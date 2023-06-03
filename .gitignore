@@ -1,0 +1,7 @@
+__pycache__/
+
+reports/
+~*.docx
+
+*.egg-info/
+

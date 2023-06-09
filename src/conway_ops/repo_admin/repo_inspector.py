@@ -1,15 +1,12 @@
-import git
-import datetime as _dt
+import abc
+import pandas                                                       as _pd
 
-from conway.util.timestamp                                  import Timestamp
+from conway_ops.repo_admin.repo_statics                             import RepoStatics
 
-class RepoInspector():
+class RepoInspector(abc.ABC):
 
     '''
-    Utility class that is able to execute GIT commands for both local and remote repos.
-
-    It was introduced as an alternative to GitPython's ``git.Repo`` class, since the latter only works
-    for repos stored in the local file system, not for remote repos identified by a URL.
+    Abstract class for utility classes that provide convenience methods to query GIT repos.
 
     :param str parent_url: A string identifying the location under which the repo of interest lives as
         a "subfolder" or "sub resource". May be a path to the local file system or the URL to a remote server.
@@ -21,129 +18,94 @@ class RepoInspector():
 
         self.parent_url                     = parent_url
         self.repo_name                      = repo_name
-        self.executor                       = git.cmd.Git(parent_url + "/" + repo_name)
 
-
-    def execute(self, command):
-        '''
-        Executes the git command.
-
-        :param str command: A string representing the full GIT CLI command to run. Example: "git status"
-        '''
-        result                              = self.executor.execute(command)
-        return result
-
-
+    @abc.abstractmethod
     def current_branch(self):
         '''
         :return: The name of the current branch
         :rtype: str
         '''
-        result                              = self.executor.execute(command = "git rev-parse --abbrev-ref HEAD")
-        return result
     
+    @abc.abstractmethod
     def modified_files(self):
         '''
         :return: List of files that have been modified but not yet staged. In the boundary case where a file
             has an unstaged deletion, that does not count as "modified" as per the semantics of this method.
         :rtype: list
         '''
-        raw                                 = self.executor.execute(command = "git ls-files -m")
-
-        # raw is something like
-        #
-        #       'src/vulnerability_management/projector/vm_database_projector.py\nsrc/vulnerability_management/util/static_globals.py'
-        #
-        # so need to split string by new lines
-        #
-        files_l                             = [x for x in raw.split("\n") if len(x) > 0]
-
-        # Under git semantics, the modified files obtained by doing "git ls-files -m" includes unstaged deletions.
-        # So to get the "real" list of modified files, exclude deletes
-        #
-        deleted_files_l                     = self.deleted_files()
-        result                              = [f for f in files_l if not f in deleted_files_l]
-
-        return result
     
+    @abc.abstractmethod
     def deleted_files(self):
         '''
         :return: List of files with an unstaged deletion
         :rtype: list
         '''
-        raw                                 = self.executor.execute(command = "git ls-files -d")
-        # raw is something like
-        #
-        #       'src/vulnerability_management/projector/vm_database_projector.py\nsrc/vulnerability_management/util/static_globals.py'
-        #
-        # so need to split string by new lines
-        #
-        result                              = [x for x in raw.split("\n") if len(x) > 0]
 
-        return result
-
+    @abc.abstractmethod
     def untracked_files(self):
         '''
         :return: List of files that are not tracked
         :rtype: list
         '''
-        raw                                 = self.executor.execute(command = "git ls-files -o --exclude-standard")
-        # raw is something like
-        #
-        #       'src/vulnerability_management/projector/vm_database_projector.py\nsrc/vulnerability_management/util/static_globals.py'
-        #
-        # so need to split string by new lines
-        #
-        result                              = [x for x in raw.split("\n") if len(x) > 0]
 
-        return result
-
+    @abc.abstractmethod
     def last_commit(self):
         '''
         :return: A :class:`CommitInfo` with information about last commit"
         :rtype: str
         '''
-        raw                                 = self.executor.execute(command = 'git log -1 --pretty=format:"%H|%as|%s"')
-
-        # raw is something like
-        #
-        #   'a72013ecceca532f6d99453d4a9a5a67d5ce8a90|2023-06-05|Added logic to create submissions directory if missing'
-        #
-        # so we must split it by the delimeter "|" and parse each token as required
-        #
-        tokens                              = raw.split("|")
-        commit_hash                         = tokens[0]
-        commit_ts                           = Timestamp.from_datetime(_dt.datetime.strptime(tokens[1], "%Y-%m-%d"))
-        commit_msg                          = "|".join(tokens[2:])
-
-        result                              = CommitInfo(commit_hash, commit_msg, commit_ts)
-
-        return result
     
+    @abc.abstractmethod
     def branches(self):
         '''
         :return: (local) branches for the repo
         :rtype: list[str]
         '''
-        raw                                 = self.executor.execute(command = 'git log -1 --pretty=format:"%H')
-        # raw is something like
-        #
-        #               '  ah-dev\n  integration\n  operate\n* story_1485'
-        #
-        # so to turn it into a list we must split by new lines and then strip out empty spaces and the "*"
-        result                              = [b.strip("*").strip() for b in raw.split("\n") if not "->" in b]
-        return result
 
-    def checkout(self, branch_name):
+    @abc.abstractmethod
+    def committed_files(self):
         '''
-        :return: A status from switching to branch ``branch_name``
-        :rtype: str
+        Returns an iterable over CommitedFileInfo objects, yielding in chronological order the history of commits
+        (i.e., a log) for the repo associated to this :class:`RepoInspector`
         '''
-        result                              = self.executor.execute(command = "git checkout " + str(branch_name))
-        return result
+
+
+    def log_to_dataframe(self):
+        '''
+        :return: A DataFrame with log information. Each row in the DataFrame
+            represents a file that was committed, so there are typically multiple rows per commit.
+        :rtype: :class:`pandas.DataFrame`
+        '''
+        commit_nb_l                                     = []
+        commit_date_l                                   = []
+        summary_l                                       = []
+        commit_file_nb_l                                = []
+        commit_file_l                                   = []
+        commit_hash_l                                   = []
+        commit_author_l                                 = []
+
+        for cfi in self.committed_files():
+
+            commit_nb_l.                                append(cfi.commit_nb)
+            commit_date_l.                              append(cfi.commit_date)
+            summary_l.                                  append(cfi.summary)
+            commit_file_nb_l.                           append(cfi.commit_file_nb)
+            commit_file_l.                              append(cfi.commit_file)
+            commit_hash_l.                              append(cfi.commit_hash)
+            commit_author_l.                            append(cfi.commit_author)
+        
+        log_dict                                        = {RepoStatics.COMMIT_NB_COL:       commit_nb_l,
+                                                           RepoStatics.COMMIT_DATE_COL:     commit_date_l,
+                                                           RepoStatics.COMMIT_SUMMARY_COL:  summary_l,
+                                                           RepoStatics.COMMIT_FILE_NB_COL:  commit_file_nb_l,
+                                                           RepoStatics.COMMIT_FILE_COL:     commit_file_l,
+                                                           RepoStatics.COMMIT_HASH_COL:     commit_hash_l,
+                                                           RepoStatics.COMMIT_AUTHOR_COL:   commit_author_l}
+
+        log_df                                          = _pd.DataFrame(log_dict)
+        return log_df
 
 class CommitInfo():
-
     '''
     Helper data structure to contain some information about a commit
 
@@ -155,3 +117,42 @@ class CommitInfo():
         self.commit_hash                    = commit_hash
         self.commit_msg                     = commit_msg
         self.commit_ts                      = commit_ts
+
+class CommittedFileInfo():
+    '''
+    Helper data structure to contain log information about 1 file included in a commit, contextualized
+    within the broader list of files for that commit, and beyond that, contextualized within the overall
+    set of commits.
+    
+    So there would be multiple :class:`CommittedFileInfo` objects per commit, one per file in the commit.
+    All those would share the same general information about the commit.
+
+    In the description of parameters below, we use this terminology:
+
+    * *this file* refers to the file associated with this :class:`CommittedFileInfo`
+
+    * *this commit* refers to the commit that contains this file.
+
+    :param int commit_nb: the :class:`RepoInspector` keeps count of the commits that exist, associating them numbers 0, 1, 2, ..., ordering
+        the commits by the date when they were made. In that count, this parameter represents the number
+        for this commit.
+    :param str commit_date: the date for this commit.
+    :param str summary: this commit's message
+    :param int commit_file_nb: the :class:`RepoInspector` keeps count of the files included in each commit,
+        associating them numbers 0, 1, 2, ...,. In that count, this parameter represents the number for this file.
+    :param str commit_file: relative path (within the repo) for this file.
+    :param str commit_hash: GIT ash for this commit
+    :param str commit_author: name of this commit's author
+    '''
+    def __init__(self, commit_nb, commit_date, summary, commit_file_nb, commit_file, commit_hash, commit_author):
+
+        self.commit_nb                      = commit_nb
+        self.commit_date                    = commit_date
+        self.summary                        = summary
+        self.commit_file_nb                 = commit_file_nb
+        self.commit_file                    = commit_file
+        self.commit_hash                    = commit_hash
+        self.commit_author                  = commit_author
+
+
+    

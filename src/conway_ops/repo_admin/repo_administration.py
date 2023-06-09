@@ -1,12 +1,13 @@
 from pathlib                                                    import Path
 import pandas                                                   as _pd
 import xlsxwriter
-from git                                                        import Repo
 
 from conway.reports.report_writer                               import ReportWriter
 
 from conway_ops.repo_admin.repo_statics                         import RepoStatics
+from conway_ops.repo_admin.repo_inspector_factory               import RepoInspectorFactory
 from conway_ops.repo_admin.repo_inspector                       import RepoInspector
+from conway_ops.repo_admin.filesystem_repo_inspector            import FileSystem_RepoInspector
 from conway_ops.repo_admin.repo_bundle                          import RepoBundle
 
 class RepoAdministration():
@@ -46,11 +47,11 @@ class RepoAdministration():
 
             # This creates the master branch
             #
-            #   GOTCHA: unlike other methods in this class, the variables like
-            #       "remote_repo" and "local repo" in this method are GitPython classes of type
-            #       git.Repo, not Conway classes of type RepoInspector
+            #   GOTCHA: unlike other methods in this class, we only support file system repos
+            #           (not GIT Hub repos)
             #
-            remote_repo                                 = Repo.init(remote_url) #, bare=True) 
+            inspector                                   = FileSystem_RepoInspector(self.remote_root, repo_info.name)
+            remote_repo                                 = inspector.init_repo() 
 
             # Avoid having an empty remote, so that it has a head and we can create branches.
             # Accomplish that by adding a scaffold README.md and a scaffold .gitignore
@@ -158,8 +159,8 @@ class RepoAdministration():
         # Now check that branch exists in all the pertinent repos
         repos_lacking_desired_branch                    = []
         for repo_name in self.repo_names:
-            repo                                        = RepoInspector(REPOS_ROOT, repo_name)
-            branches                                    = repo.branches()
+            inspector                                   = RepoInspectorFactory.findInspector(REPOS_ROOT, repo_name)
+            branches                                    = inspector.branches()
             if not branch_name in branches:
                 repos_lacking_desired_branch.append(repo_name)
         if len(repos_lacking_desired_branch) > 0:
@@ -168,9 +169,9 @@ class RepoAdministration():
 
         # Now move to the new branch
         for repo_name in self.repo_names:
-            repo                                        = RepoInspector(REPOS_ROOT, repo_name)
+            inspector                                   = RepoInspectorFactory.findInspector(REPOS_ROOT, repo_name)
 
-            status                                      = repo.checkout(branch_name)
+            status                                      = inspector.checkout(branch_name)
 
             print("\n-----------" + repo_name + "-----------\n")
             print("\tStatus:\t\t" + str(status))
@@ -287,24 +288,24 @@ class RepoAdministration():
         if repos_in_scope_l is None:
             repos_in_scope_l                            = [repo_info.name for repo_info in self.repo_bundle.bundled_repos()]
         for repo_name in repos_in_scope_l:
-            local_repo                                  = RepoInspector(self.local_root, repo_name)
+            local_inspector                             = RepoInspectorFactory.findInspector(self.local_root, repo_name)
 
             repo_name, current_branch, \
                 commit_message, commit_ts, commit_hash, \
                 untracked_files, modified_files, deleted_files \
-                                                        = self._one_repo_stats(local_repo)
+                                                        = self._one_repo_stats(local_inspector)
             local_or_remote                             = RS.LOCAL_REPO
             data_l.append([repo_name, local_or_remote, current_branch, 
                            len(untracked_files), len(modified_files), len(deleted_files),
                            commit_message, commit_ts, commit_hash, 
                            ])
 
-            remote_repo                             = RepoInspector(self.remote_root, repo_name)
+            remote_inspector                            = RepoInspectorFactory.findInspector(self.remote_root, repo_name)
 
             repo_name, current_branch, \
                 commit_message, commit_ts, commit_hash, \
                 untracked_files, modified_files, deleted_files \
-                                                    = self._one_repo_stats(remote_repo)
+                                                    = self._one_repo_stats(remote_inspector)
             local_or_remote                         = RS.REMOTE_REPO
             data_l.append([repo_name, local_or_remote, current_branch, 
                            len(untracked_files), len(modified_files), len(deleted_files),
@@ -329,11 +330,11 @@ class RepoAdministration():
         if repos_in_scope_l is None:
             repos_in_scope_l                            = [repo_info.name for repo_info in self.repo_bundle.bundled_repos()]
         for repo_name in repos_in_scope_l:
-            local_repo                                  = RepoInspector(self.local_root, repo_name)
-            remote_repo                                 = RepoInspector(self.local_root,repo_name)
+            local_inspector                             = RepoInspectorFactory.findInspector(self.local_root, repo_name)
+            remote_inspector                            = RepoInspectorFactory.findInspector(self.remote_root,repo_name)
 
-            local_log_df                                = self._log_to_dataframe(local_repo)
-            remote_log_df                               = self._log_to_dataframe(remote_repo)
+            local_log_df                                = local_inspector.log_to_dataframe()
+            remote_log_df                               = remote_inspector.log_to_dataframe()
             result_dict[repo_name]                      = {RepoStatics.LOCAL_REPO:      local_log_df,
                                                            RepoStatics.REMOTE_REPO:     remote_log_df}
 
@@ -368,81 +369,6 @@ class RepoAdministration():
         lines.append("")
 
         return lines
-
-    def _log_to_dataframe(self, repo: RepoInspector):
-        '''
-        :param RepoInspector repo: object representing a GIT repo whose log information we want to get
-        :return: A DataFrame with log information for the given ``repo``. Each row in the DataFrame
-            represents a file that was committed, so there are typically multiple rows per commit.
-        :rtype: :class:`pandas.DataFrame`
-        '''
-        log                                             = repo.execute("git log --name-only")
-        commits                                         = log.split("commit ")
-        commits                                         = [c for c in commits if len(c)>0] # Filter out spurious tokens
-
-        commit_nb_l                                     = []
-        commit_date_l                                   = []
-        summary_l                                       = []
-        commit_file_nb_l                                = []
-        commit_file_l                                   = []
-        commit_hash_l                                   = []
-        commit_author_l                                 = []
-
-
-        for commit_nb in reversed(range(len(commits))): # Use reversed to list commits in the order in which they were made
-            commit                                      = commits[commit_nb]
-            lines                                       = commit.split("\n")
-            '''
-            The business logic below is inspired by this observation: if we print the lines
-            with a prefix for the line number, by doing
-
-                    for idx in range(len(lines)):
-                        line = lines[idx]
-                        print(str(idx) + ": " + line)
-
-            then the result is something like
-
-                0: 0d7521b185f4ba7748ca1e78f990b61a4bdfd8b8
-                1: Author: Alejandro Hernandez <alejandro.hernandez@finastra.com>
-                2: Date:   Wed May 17 14:03:58 2023 -0700
-                3: 
-                4:     [LEA UserStory 1455] Moved notebooks to ops repo
-                5: 
-                6: src/notebooks/.ipynb_checkpoints/GIT dashboard-checkpoint.ipynb
-                7: src/notebooks/.ipynb_checkpoints/Scratch-checkpoint.ipynb
-                8: src/notebooks/.ipynb_checkpoints/exploreClassifier-checkpoint.ipynb
-
-                        ...             ...
-
-            UPSHOT: this tells that lines 0,1,2,4 give us the hash, author, date and summary, and lines 6+ the 
-                files that changed.
-            '''
-            hash                                        = lines[0]
-            author                                      = lines[1].strip("Author:").strip()
-            date                                        = lines[2].strip("Date:").strip()
-            summary                                     = lines[4].strip()
-            OFFSET                                      = 6
-            for idx in range(OFFSET, len(lines)):
-                file                                    = lines[idx]
-
-                commit_nb_l.                            append(commit_nb)
-                commit_date_l.                          append(date)
-                summary_l.                              append(summary)
-                commit_file_nb_l.                       append(idx - OFFSET)
-                commit_file_l.                          append(file)
-                commit_hash_l.                          append(hash)
-                commit_author_l.                        append(author)
-        
-        log_dict                                        = {RepoStatics.COMMIT_NB_COL:       commit_nb_l,
-                                                           RepoStatics.COMMIT_DATE_COL:     commit_date_l,
-                                                           RepoStatics.COMMIT_SUMMARY_COL:  summary_l,
-                                                           RepoStatics.COMMIT_FILE_NB_COL:  commit_file_nb_l,
-                                                           RepoStatics.COMMIT_FILE_COL:     commit_file_l,
-                                                           RepoStatics.COMMIT_HASH_COL:     commit_hash_l,
-                                                           RepoStatics.COMMIT_AUTHOR_COL:   commit_author_l}
-
-        log_df                                          = _pd.DataFrame(log_dict)
-        return log_df
 
     def _one_repo_stats(self, repo: RepoInspector):
         '''

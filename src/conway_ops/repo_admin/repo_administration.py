@@ -115,7 +115,7 @@ class RepoAdministration():
         '''
         raise ValueError("Not implemented")
 
-    def checkout_branch(self, branch_name, local=True):
+    def checkout_branch(self, branch_name, repos_in_scope_l, local=True):
         '''
         For GIT repos in scope, switches them all to the branch given by ``branch_name``, provided that:
 
@@ -124,6 +124,8 @@ class RepoAdministration():
         * All repos in scope have branch called ``branch_name``
 
         :param str branch_name: The name of the branch to which to switch
+        :param list[str] repos_in_scope_l: A list of names for GIT repos for which stats are requested. 
+
         :param bool local: Optional parameter that is True by default. 
             If True, then the repos in scope are local, i.e., the GIT repos under ``self.local_root``. If False,
             then repos in scope are remote, i.e., under ``self.remote_root``.
@@ -139,14 +141,14 @@ class RepoAdministration():
             repo_environment                            = RS.REMOTE_REPO
 
         # Check that we can move out of current branch safely, i.e., there is no uncommitted work
-        stats_df                                        = self.repo_stats(repos_in_scope_l=self.repo_names)
+        stats_df                                        = self.repo_stats(repos_in_scope_l=repos_in_scope_l)
         stats_df                                        = stats_df[stats_df[RS.LOCAL_OR_REMOTE_COL]==repo_environment]
         def _bad_row(row):
             '''
             Returns True if the ``row`` contains information about a repo that has untracked changes or is dirty
             (i.e., working tree has modifications and/or index has uncommitted changes)
             '''
-            if row[RS.NB_UNTRACKED_FILES_COL] > 0 or row[RS.IS_DIRTY_COL] is True:
+            if row[RS.NB_UNTRACKED_FILES_COL] > 0 or row[RS.NB_MODIFIED_FILES_COL] > 0 or row[RS.NB_DELETED_FILES_COL] > 0:
                 return True
             else:
                 return False
@@ -158,7 +160,7 @@ class RepoAdministration():
         
         # Now check that branch exists in all the pertinent repos
         repos_lacking_desired_branch                    = []
-        for repo_name in self.repo_names:
+        for repo_name in repos_in_scope_l:
             inspector                                   = RepoInspectorFactory.findInspector(REPOS_ROOT, repo_name)
             branches                                    = inspector.branches()
             if not branch_name in branches:
@@ -168,7 +170,7 @@ class RepoAdministration():
                              + ", ".join(repos_lacking_desired_branch))
 
         # Now move to the new branch
-        for repo_name in self.repo_names:
+        for repo_name in repos_in_scope_l:
             inspector                                   = RepoInspectorFactory.findInspector(REPOS_ROOT, repo_name)
 
             status                                      = inspector.checkout(branch_name)
@@ -189,7 +191,7 @@ class RepoAdministration():
             must be saved. The Excel report created by this method will be saved in the subdirectory
             ``/Operator Reports/DevOps/`` under this root ``publications_folder``.
         :param list[str] repos_in_scope_l: A list of names for GIT repos for which stats are requested. If set to None, 
-            then it will default to provide stats for ``self.repo_names``
+            then it will default to provide stats for the repos ``self.repo_bundle``
         :param bool mask_nondeterministic_data: If True, then any data that is non-deterministic (such as dates or hash 
             codes) is masked. This is False by default. Typical use case for masking is in test cases that need 
             determinism.

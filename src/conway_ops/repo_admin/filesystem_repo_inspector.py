@@ -122,7 +122,7 @@ class FileSystem_RepoInspector(RepoInspector):
         :return: (local) branches for the repo
         :rtype: list[str]
         '''
-        raw                                 = self.executor.execute(command = 'git log -1 --pretty=format:"%H')
+        raw                                 = self.executor.execute(command = 'git branch')
         # raw is something like
         #
         #               '  ah-dev\n  integration\n  operate\n* story_1485'

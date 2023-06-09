@@ -151,9 +151,12 @@ class FileSystem_RepoInspector(RepoInspector):
         result                                          = []
 
 
-        for reverse_commit_nb in reversed(range(len(commits))): # Use reversed to list commits in the order in which they were made
-            commit                                      = commits[reverse_commit_nb]
-            commit_nb                                   = len(commits) - 1 - reverse_commit_nb
+        for commit_idx in range(len(commits)): # Use reversed to list commits in the order in which they were made
+            commit                                      = commits[commit_idx]
+
+            # commit_idx goes like 0, 1, 2, ..., listing commits in reverse order, so if we count commits
+            # from the first commit to the last, we need to make commit_nb go in the reverse ordering: .., 2, 1, 0
+            commit_nb                                   = len(commits) - 1 - commit_idx
             lines                                       = commit.split("\n")
             '''
             The business logic below is inspired by this observation: if we print the lines
@@ -218,7 +221,7 @@ class FileSystem_RepoInspector(RepoInspector):
                     if next_line.startswith("Author:"):
                         author                              = next_line.strip("Author:").strip()
                     elif next_line.startswith("Date:"):
-                        date                                = lines[2].strip("Date:").strip()
+                        date                                = next_line.strip("Date:").strip()
                     elif next_line.startswith(A_SPACE):
                         # Got to the summary. Done parsing this phase of the text
                         return

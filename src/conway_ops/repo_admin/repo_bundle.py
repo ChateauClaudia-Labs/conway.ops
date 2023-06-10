@@ -28,17 +28,17 @@ class RepoBundle():
         '''
         # Standard templates for naming repos
 
-        APPLICATION_REPO_NAME               = self.project_name
+        APPLICATION                         = self.project_name
 
-        bundled_repos                       = [RepoInfo(APPLICATION_REPO_NAME,
+        bundled_repos                       = [RepoInfo(APPLICATION + ".svc",
                                                         "Source code for business logic and services layers"),
-                                                RepoInfo(APPLICATION_REPO_NAME + "_docs",
+                                                RepoInfo(APPLICATION + ".docs",
                                                         "Source code for documentation website"),
-                                                RepoInfo(APPLICATION_REPO_NAME + "_test",
+                                                RepoInfo(APPLICATION + ".test",
                                                         "Source code for test cases"),
-                                                RepoInfo(APPLICATION_REPO_NAME + "_scenarios",
+                                                RepoInfo(APPLICATION + ".scenarios",
                                                         "Collection of self-contained databases (scenarios) used by test cases"),
-                                                RepoInfo(APPLICATION_REPO_NAME + "_ops",
+                                                RepoInfo(APPLICATION + ".ops",
                                                         "Source code for tools to operate")
                                                 ]
 

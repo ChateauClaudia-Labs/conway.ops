@@ -1,7 +1,9 @@
 import git
 import datetime as _dt
 
+from conway.observability.logger                            import Logger
 from conway.util.timestamp                                  import Timestamp
+
 from conway_ops.repo_admin.repo_inspector                   import RepoInspector, CommitInfo, CommittedFileInfo
 
 class FileSystem_RepoInspector(RepoInspector):
@@ -100,7 +102,7 @@ class FileSystem_RepoInspector(RepoInspector):
         :return: A :class:`CommitInfo` with information about last commit"
         :rtype: str
         '''
-        raw                                 = self.executor.execute(command = 'git log -1 --pretty=format:"%H|%as|%s"')
+        raw                                 = self.executor.execute(command = 'git log -1 --pretty=format:"%H|%ai|%s"')
 
         # raw is something like
         #
@@ -110,7 +112,21 @@ class FileSystem_RepoInspector(RepoInspector):
         #
         tokens                              = raw.split("|")
         commit_hash                         = tokens[0]
-        commit_ts                           = Timestamp.from_datetime(_dt.datetime.strptime(tokens[1], "%Y-%m-%d"))
+        
+        
+        #commit_ts                           = Timestamp.from_datetime(_dt.datetime.strptime(tokens[1], "%Y-%m-%d"))
+
+        # tokens[1] is something like
+        #
+        #           "2023-06-14 20:32:57 -0700"
+        #
+        # and we want to convert it ``commit_ts``, something like
+        #
+        #           "230614.203257"
+        #
+        parsed_dt                           =  _dt.datetime.strptime(tokens[1], "%Y-%m-%d %H:%M:%S %z")
+        commit_ts                           = parsed_dt.strftime("%y%m%d.%H%M%S")
+
         commit_msg                          = "|".join(tokens[2:])
 
         result                              = CommitInfo(commit_hash, commit_msg, commit_ts)
@@ -281,3 +297,50 @@ class FileSystem_RepoInspector(RepoInspector):
 
 
         return result
+    
+
+    def pull_request(self, from_branch, to_branch):
+        '''
+        Creates and completes a pull request from the ``from_branch`` to the ``to_branch``.
+
+        If anything goes wrong it raises an exception.
+        '''    
+        executor            = git.cmd.Git(self.parent_url + "/" + self.repo_name) 
+
+        status1             = executor.execute(command = 'git checkout ' + to_branch)
+        Logger.log_info("Checkout '" + to_branch + "':\n" + str(status1))
+
+        status2             = executor.execute(command = 'git merge ' + from_branch)
+        Logger.log_info("Merge from '" + from_branch + "':\n" + str(status2))
+
+    def checkout(self, branch):
+        '''
+        Switches the repo to the given branch.
+
+        :param str branch: branch to switch repo to.
+
+        If anything goes wrong it raises an exception.
+        '''
+        executor            = git.cmd.Git(self.parent_url + "/" + self.repo_name) 
+
+        status1             = executor.execute(command = 'git checkout ' + branch)
+        Logger.log_info("Checkout '" + branch + "':\n" + str(status1))
+
+
+    def update_local(self, branch):
+        '''
+        Updates the local repo from the remote, for the given ``branch``.
+
+        If anything goes wrong it raises an exception.
+
+        :param str branch: repo local branch to update from the remote.
+        '''
+        Logger.log_info("\t\t*** using " + str(self.parent_url) + " ***")
+        executor            = git.cmd.Git(self.parent_url + "/" + self.repo_name) 
+
+        status1             = executor.execute(command = 'git checkout ' + branch)
+        Logger.log_info("Checkout '" + branch + "':\n" + str(status1))
+
+        status2             = executor.execute(command = 'git pull')
+        Logger.log_info("Pull '" + branch + "':\n" + str(status2))
+

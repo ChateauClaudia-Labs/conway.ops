@@ -69,6 +69,34 @@ class RepoInspector(abc.ABC):
         (i.e., a log) for the repo associated to this :class:`RepoInspector`
         '''
 
+    @abc.abstractmethod
+    def pull_request(self, from_branch, to_branch):
+        '''
+        Creates and completes a pull request from the ``from_branch`` to the ``to_branch``.
+
+        If anything goes wrong it raises an exception.
+        '''
+
+    @abc.abstractmethod
+    def checkout(self, branch):
+        '''
+        Switches the repo to the given branch.
+
+        :param str branch: branch to switch repo to.
+
+        If anything goes wrong it raises an exception.
+        '''
+
+
+    @abc.abstractmethod
+    def update_local(self, branch):
+        '''
+        Updates the local repo from the remote, for the given ``branch``.
+
+        If anything goes wrong it raises an exception.
+
+        :param str branch: repo local branch to update from the remote.
+        '''
 
     def log_to_dataframe(self):
         '''

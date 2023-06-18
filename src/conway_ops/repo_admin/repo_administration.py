@@ -1,6 +1,10 @@
 from pathlib                                                    import Path
 import pandas                                                   as _pd
 import xlsxwriter
+import git                                                      as _git
+
+from conway.application.application                             import Application
+from conway.observability.logger                                import Logger
 
 from conway.reports.report_writer                               import ReportWriter
 
@@ -13,7 +17,7 @@ from conway_ops.repo_admin.repo_bundle                          import RepoBundl
 class RepoAdministration():
 
     '''
-    Class to assist operator to manage the multiple repos that comprise the Vulnerability Management solution
+    Class to assist operator to manage the multiple repos that comprise a Conway application.
 
     :param str local_root: Folder or URL of the parent folder for all local GIT repos.
 
@@ -81,39 +85,61 @@ class RepoAdministration():
             master_branch.checkout()
 
         return bundle
-      
-    def create_branch(self, branch_name):
-        '''
-        Creates a new local GIT branch called ``branch_name`` in all the repos, and sets up the
-        corresponding remote.
-
-        The contents of the new branch are initialized to be the same as the remote master branch.
-        '''
-        raise ValueError("Not implemented")
     
-    def commit_branch(self, branch_name, commit_message, preview_only=True):
+    def branches(self, repo_name):
         '''
-        Identifies all the changes in the working trees across all local repos, and then either:
-
-        * Returns a string message with what they are, if ``preview_only`` is True
-
-        * Or adds all the changes to the index, commits them, pushes to the remote, and merges them into master in the
-          remote.
+        :return: branches in local repo
+        :rtype: list[str]
         '''
-        raise ValueError("Not implemented")
+        executor                = _git.cmd.Git(self.local_root + "/" + repo_name)
+
+        git_result              = executor.execute("git branch")
+
+        # git_result is something like
+        #
+        #       '  ah-dev\n  integration\n  operate\n* story_1455\n  story_1485'
+        #
+        # so to get a list we must split by new lines and strip spaces and the '*'
+
+        branch_l                = [b.strip("*").strip() for b in git_result.split("\n")]
+        return branch_l
     
-    def update_release_candidate_branch(self, timestamp):
+    def is_branch_merged_to_destination(self, repo_name, branch_name, destination_branch):
         '''
-        Merges the contents of the master branch into the release candidate branch identified by the given timestamp.
+        :return: True if the local branch called ``branch_name`` has already been merged into the
+            ``destination_branch``. Returns False otherwise.
+        :rtype: bool
+        '''
+        executor                = _git.cmd.Git(self.local_root + "/" + repo_name)
 
-        :param Timestamp timestamp: used to tag the branch being created and/or updated.
-        '''
-        raise ValueError("Not implemented")
+        git_result              = executor.execute("git branch --merged " + str(destination_branch))
+
+        # git_result is something like
+        #
+        #       '  ah-dev\n  integration\n  operate\n* story_1455\n  story_1485'
+        #
+        # so to get a list we must split by new lines and strip spaces and the '*'
+
+        branch_l                = [b.strip("*").strip() for b in git_result.split("\n")]
+
+        if branch_name in branch_l:
+            return True
+        else:
+            return False
     
-    def remove_branch(self, branch_name):
+    def repo_names(self):
         '''
+        :return: names of all the repos in this :class:`RepoAdministration`'s repo bundle.
+        :rtype: list[str]
         '''
-        raise ValueError("Not implemented")
+        return [repo_info.name for repo_info in self.repo_bundle.bundled_repos()]
+       
+    def current_local_branch(self, repo_name):
+        '''
+        Returns the name of the current branch in the local repo identified by ``repo_name``
+        '''
+        inspector                                   = RepoInspectorFactory.findInspector(self.local_root, repo_name)
+        return inspector.current_branch()
 
     def checkout_branch(self, branch_name, repos_in_scope_l, local=True):
         '''
@@ -288,7 +314,7 @@ class RepoAdministration():
                                                            RS.LAST_COMMIT_HASH_COL,
                                                            ]
         if repos_in_scope_l is None:
-            repos_in_scope_l                            = [repo_info.name for repo_info in self.repo_bundle.bundled_repos()]
+            repos_in_scope_l                            = self.repo_names()
         for repo_name in repos_in_scope_l:
             local_inspector                             = RepoInspectorFactory.findInspector(self.local_root, repo_name)
 
@@ -330,7 +356,7 @@ class RepoAdministration():
         '''
         result_dict                                     = {}
         if repos_in_scope_l is None:
-            repos_in_scope_l                            = [repo_info.name for repo_info in self.repo_bundle.bundled_repos()]
+            repos_in_scope_l                            = self.repo_names()
         for repo_name in repos_in_scope_l:
             local_inspector                             = RepoInspectorFactory.findInspector(self.local_root, repo_name)
             remote_inspector                            = RepoInspectorFactory.findInspector(self.remote_root,repo_name)
@@ -381,7 +407,7 @@ class RepoAdministration():
         commit_info                                     = repo.last_commit()
         commit_hash                                     = commit_info.commit_hash
         commit_message                                  = commit_info.commit_msg
-        commit_ts                                       = commit_info.commit_ts.timestamp
+        commit_ts                                       = commit_info.commit_ts
 
         untracked_files                                 = repo.untracked_files()
         modified_files                                  = repo.modified_files()
@@ -391,3 +417,11 @@ class RepoAdministration():
             untracked_files, modified_files, deleted_files
 
 
+    def log_info(self, msg):
+        '''
+        Logs the ``msg`` at the INFO log level.
+
+        :param str msg: Information to be logged
+        '''
+        #Application.app().log(msg, Logger.LEVEL_INFO, show_caller=False)
+        Logger.log_info(msg)

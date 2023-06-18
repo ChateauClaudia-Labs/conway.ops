@@ -140,7 +140,9 @@ class GitHub_RepoInspector(RepoInspector):
         commit_datetime                     = _parser.parse(data['commit']['author']['date'])
         
         commit_hash                         = data['sha']
-        commit_ts                           = Timestamp.from_datetime(commit_datetime)
+
+        commit_ts                           = commit_datetime.strftime("%y%m%d.%H%M%S")
+
         commit_msg                          = data['commit']['message']
 
         result                              = CommitInfo(commit_hash, commit_msg, commit_ts)
@@ -190,6 +192,34 @@ class GitHub_RepoInspector(RepoInspector):
             commit_nb                       -= 1
 
         return aggregated_cfi_l
+    
+    def pull_request(self, from_branch, to_branch):
+        '''
+        Creates and completes a pull request from the ``from_branch`` to the ``to_branch``.
+
+        If anything goes wrong it raises an exception.
+        '''    
+        raise ValueError("Not yet implemented")
+    
+    def checkout(self, branch):
+        '''
+        Switches the repo to the given branch.
+
+        :param str branch: branch to switch repo to.
+
+        If anything goes wrong it raises an exception.
+        '''
+        raise ValueError("Not yet implemented")
+    
+    def update_local(self, branch):
+        '''
+        Updates the local repo from the remote, for the given ``branch``.
+
+        If anything goes wrong it raises an exception.
+
+        :param str branch: repo local branch to update from the remote.
+        '''
+        raise ValueError("Not yet implemented")
 
     def _committed_files_impl(self, results_dict_so_far, data):
         '''

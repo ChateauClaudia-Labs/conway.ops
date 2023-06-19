@@ -308,10 +308,6 @@ class BranchLifecycleManager(RepoAdministration):
                                                                     command = 'git push origin --delete  ' + str(feature_branch))
             self.log_info("Deleted remote '" + str(feature_branch) + "':\n" + str(status2)) 
 
-
-            
-
-
     def refresh_from_integration(self, feature_branch):
         '''
         Cascade changes from the remote integration branch to the local feature branch, and switches to the local
@@ -327,3 +323,16 @@ class BranchLifecycleManager(RepoAdministration):
 
             # Now merge integration into feature branch
             local_inspector.pull_request(from_branch = self.INTEGRATION_BRANCH, to_branch = feature_branch)
+
+    def refresh_from_remote(self, feature_branch):
+        '''
+        Updates local feature branch from the remote feature branch.
+        '''
+        for repo_name in self.repo_names():
+            self.log_info("\n-----------" + repo_name + "-----------")
+
+            local_inspector                             = RepoInspectorFactory.findInspector(self.local_root, repo_name)
+
+            # First, refresh the local integration branch from the remote integration branch
+            local_inspector.update_local(feature_branch)
+

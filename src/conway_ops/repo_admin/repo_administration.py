@@ -1,18 +1,23 @@
-from git                                                                import Repo
-from pathlib                                                            import Path
-import pandas                                                           as _pd
+from pathlib                                                    import Path
+import pandas                                                   as _pd
 import xlsxwriter
+import git                                                      as _git
 
-from conway.util.timestamp                                 import Timestamp
-from conway.reports.report_writer                          import ReportWriter
+from conway.application.application                             import Application
+from conway.observability.logger                                import Logger
 
-from conway_ops.repo_admin.repo_statics                    import RepoStatics
-from conway_ops.repo_admin.repo_bundle                     import RepoBundle
+from conway.reports.report_writer                               import ReportWriter
+
+from conway_ops.repo_admin.repo_statics                         import RepoStatics
+from conway_ops.repo_admin.repo_inspector_factory               import RepoInspectorFactory
+from conway_ops.repo_admin.repo_inspector                       import RepoInspector
+from conway_ops.repo_admin.filesystem_repo_inspector            import FileSystem_RepoInspector
+from conway_ops.repo_admin.repo_bundle                          import RepoBundle
 
 class RepoAdministration():
 
     '''
-    Class to assist operator to manage the multiple repos that comprise the Vulnerability Management solution
+    Class to assist operator to manage the multiple repos that comprise a Conway application.
 
     :param str local_root: Folder or URL of the parent folder for all local GIT repos.
 
@@ -45,7 +50,12 @@ class RepoAdministration():
             local_url                                   = self.local_root + "/" + repo_info.name
 
             # This creates the master branch
-            remote_repo                                 = Repo.init(remote_url) #, bare=True) 
+            #
+            #   GOTCHA: unlike other methods in this class, we only support file system repos
+            #           (not GIT Hub repos)
+            #
+            inspector                                   = FileSystem_RepoInspector(self.remote_root, repo_info.name)
+            remote_repo                                 = inspector.init_repo() 
 
             # Avoid having an empty remote, so that it has a head and we can create branches.
             # Accomplish that by adding a scaffold README.md and a scaffold .gitignore
@@ -75,41 +85,63 @@ class RepoAdministration():
             master_branch.checkout()
 
         return bundle
-      
-    def create_branch(self, branch_name):
-        '''
-        Creates a new local GIT branch called ``branch_name`` in all the repos, and sets up the
-        corresponding remote.
-
-        The contents of the new branch are initialized to be the same as the remote master branch.
-        '''
-        raise ValueError("Not implemented")
     
-    def commit_branch(self, branch_name, commit_message, preview_only=True):
+    def branches(self, repo_name):
         '''
-        Identifies all the changes in the working trees across all local repos, and then either:
-
-        * Returns a string message with what they are, if ``preview_only`` is True
-
-        * Or adds all the changes to the index, commits them, pushes to the remote, and merges them into master in the
-          remote.
+        :return: branches in local repo
+        :rtype: list[str]
         '''
-        raise ValueError("Not implemented")
+        executor                = _git.cmd.Git(self.local_root + "/" + repo_name)
+
+        git_result              = executor.execute("git branch")
+
+        # git_result is something like
+        #
+        #       '  ah-dev\n  integration\n  operate\n* story_1455\n  story_1485'
+        #
+        # so to get a list we must split by new lines and strip spaces and the '*'
+
+        branch_l                = [b.strip("*").strip() for b in git_result.split("\n")]
+        return branch_l
     
-    def update_release_candidate_branch(self, timestamp):
+    def is_branch_merged_to_destination(self, repo_name, branch_name, destination_branch):
         '''
-        Merges the contents of the master branch into the release candidate branch identified by the given timestamp.
+        :return: True if the local branch called ``branch_name`` has already been merged into the
+            ``destination_branch``. Returns False otherwise.
+        :rtype: bool
+        '''
+        executor                = _git.cmd.Git(self.local_root + "/" + repo_name)
 
-        :param Timestamp timestamp: used to tag the branch being created and/or updated.
-        '''
-        raise ValueError("Not implemented")
+        git_result              = executor.execute("git branch --merged " + str(destination_branch))
+
+        # git_result is something like
+        #
+        #       '  ah-dev\n  integration\n  operate\n* story_1455\n  story_1485'
+        #
+        # so to get a list we must split by new lines and strip spaces and the '*'
+
+        branch_l                = [b.strip("*").strip() for b in git_result.split("\n")]
+
+        if branch_name in branch_l:
+            return True
+        else:
+            return False
     
-    def remove_branch(self, branch_name):
+    def repo_names(self):
         '''
+        :return: names of all the repos in this :class:`RepoAdministration`'s repo bundle.
+        :rtype: list[str]
         '''
-        raise ValueError("Not implemented")
+        return [repo_info.name for repo_info in self.repo_bundle.bundled_repos()]
+       
+    def current_local_branch(self, repo_name):
+        '''
+        Returns the name of the current branch in the local repo identified by ``repo_name``
+        '''
+        inspector                                   = RepoInspectorFactory.findInspector(self.local_root, repo_name)
+        return inspector.current_branch()
 
-    def checkout_branch(self, branch_name, local=True):
+    def checkout_branch(self, branch_name, repos_in_scope_l, local=True):
         '''
         For GIT repos in scope, switches them all to the branch given by ``branch_name``, provided that:
 
@@ -118,6 +150,8 @@ class RepoAdministration():
         * All repos in scope have branch called ``branch_name``
 
         :param str branch_name: The name of the branch to which to switch
+        :param list[str] repos_in_scope_l: A list of names for GIT repos for which stats are requested. 
+
         :param bool local: Optional parameter that is True by default. 
             If True, then the repos in scope are local, i.e., the GIT repos under ``self.local_root``. If False,
             then repos in scope are remote, i.e., under ``self.remote_root``.
@@ -133,14 +167,14 @@ class RepoAdministration():
             repo_environment                            = RS.REMOTE_REPO
 
         # Check that we can move out of current branch safely, i.e., there is no uncommitted work
-        stats_df                                        = self.repo_stats(repos_in_scope_l=self.repo_names)
+        stats_df                                        = self.repo_stats(repos_in_scope_l=repos_in_scope_l)
         stats_df                                        = stats_df[stats_df[RS.LOCAL_OR_REMOTE_COL]==repo_environment]
         def _bad_row(row):
             '''
             Returns True if the ``row`` contains information about a repo that has untracked changes or is dirty
             (i.e., working tree has modifications and/or index has uncommitted changes)
             '''
-            if row[RS.NB_UNTRACKED_FILES_COL] > 0 or row[RS.IS_DIRTY_COL] is True:
+            if row[RS.NB_UNTRACKED_FILES_COL] > 0 or row[RS.NB_MODIFIED_FILES_COL] > 0 or row[RS.NB_DELETED_FILES_COL] > 0:
                 return True
             else:
                 return False
@@ -152,23 +186,20 @@ class RepoAdministration():
         
         # Now check that branch exists in all the pertinent repos
         repos_lacking_desired_branch                    = []
-        for repo_name in self.repo_names:
-            repo                                        = Repo(REPOS_ROOT + "/" + repo_name)
-            branches                                    = [ref.name for ref in repo.references]
-            if local == True and not branch_name in branches:
-                repos_lacking_desired_branch.append(repo_name)
-            elif "origin/" + branch_name not in branches:
+        for repo_name in repos_in_scope_l:
+            inspector                                   = RepoInspectorFactory.findInspector(REPOS_ROOT, repo_name)
+            branches                                    = inspector.branches()
+            if not branch_name in branches:
                 repos_lacking_desired_branch.append(repo_name)
         if len(repos_lacking_desired_branch) > 0:
             raise ValueError("Can't switch to branch '" + str(branch_name) + "' because that branch doesn't exist in these repos: "
                              + ", ".join(repos_lacking_desired_branch))
 
         # Now move to the new branch
-        for repo_name in self.repo_names:
-            repo                                        = Repo(REPOS_ROOT + "/" + repo_name)
-            git                                         = repo.git
+        for repo_name in repos_in_scope_l:
+            inspector                                   = RepoInspectorFactory.findInspector(REPOS_ROOT, repo_name)
 
-            status                                      = git.checkout(branch_name)
+            status                                      = inspector.checkout(branch_name)
 
             print("\n-----------" + repo_name + "-----------\n")
             print("\tStatus:\t\t" + str(status))
@@ -186,7 +217,7 @@ class RepoAdministration():
             must be saved. The Excel report created by this method will be saved in the subdirectory
             ``/Operator Reports/DevOps/`` under this root ``publications_folder``.
         :param list[str] repos_in_scope_l: A list of names for GIT repos for which stats are requested. If set to None, 
-            then it will default to provide stats for ``self.repo_names``
+            then it will default to provide stats for the repos ``self.repo_bundle``
         :param bool mask_nondeterministic_data: If True, then any data that is non-deterministic (such as dates or hash 
             codes) is masked. This is False by default. Typical use case for masking is in test cases that need 
             determinism.
@@ -228,6 +259,7 @@ class RepoAdministration():
                 if mask_nondeterministic_data:
                     log_df[RepoStatics.COMMIT_DATE_COL]         = MASKED_MSG
                     log_df[RepoStatics.COMMIT_HASH_COL]         = MASKED_MSG
+                    log_df[RepoStatics.COMMIT_AUTHOR_COL]       = MASKED_MSG
 
                 sheet_name                                      = RepoAdministration.worksheet_for_log(repo_name, 
                                                                                                        instance_type)
@@ -262,7 +294,7 @@ class RepoAdministration():
     def repo_stats(self, repos_in_scope_l=None):
         '''
         :param list[str] repos_in_scope_l: A list of names for GIT repos for which stats are requested. If set to None, 
-            then it will default to provide stats for ``self.repo_names``
+            then it will default to provide stats for names of ``self.repo_bundle.bundled_repos()``
         :return: A descriptive DataFrame with information about each repo, such as what branch it is in for local and 
             remote, whether it has unchecked or untracked files, and most recent commit.
         :rtype: :class:`pandas.DataFrame`
@@ -274,33 +306,39 @@ class RepoAdministration():
         columns                                         = [RS.REPO_NAME_COL,
                                                            RS.LOCAL_OR_REMOTE_COL,
                                                            RS.CURRENT_BRANCH_COL,
-                                                           RS.IS_DIRTY_COL,
                                                            RS.NB_UNTRACKED_FILES_COL,
+                                                           RS.NB_MODIFIED_FILES_COL,
+                                                           RS.NB_DELETED_FILES_COL,
                                                            RS.LAST_COMMIT_COL,
                                                            RS.LAST_COMMIT_TIMESTAMP_COL,
                                                            RS.LAST_COMMIT_HASH_COL,
                                                            ]
         if repos_in_scope_l is None:
-            repos_in_scope_l                            = [repo_info.name for repo_info in self.repo_bundle.bundled_repos()]
+            repos_in_scope_l                            = self.repo_names()
         for repo_name in repos_in_scope_l:
-            local_repo                                  = Repo(self.local_root + "/" + repo_name)
-            remote_repo                                 = Repo(self.remote_root + "/" + repo_name)
+            local_inspector                             = RepoInspectorFactory.findInspector(self.local_root, repo_name)
 
             repo_name, current_branch, \
                 commit_message, commit_ts, commit_hash, \
-                is_dirty, untracked_files               = self._one_repo_stats(local_repo)
+                untracked_files, modified_files, deleted_files \
+                                                        = self._one_repo_stats(local_inspector)
             local_or_remote                             = RS.LOCAL_REPO
-            data_l.append([repo_name, local_or_remote, current_branch, is_dirty, len(untracked_files),
+            data_l.append([repo_name, local_or_remote, current_branch, 
+                           len(untracked_files), len(modified_files), len(deleted_files),
                            commit_message, commit_ts, commit_hash, 
                            ])
 
+            remote_inspector                            = RepoInspectorFactory.findInspector(self.remote_root, repo_name)
+
             repo_name, current_branch, \
                 commit_message, commit_ts, commit_hash, \
-                is_dirty, untracked_files               = self._one_repo_stats(remote_repo)
-            local_or_remote                             = RS.REMOTE_REPO
-            data_l.append([repo_name, local_or_remote, current_branch, is_dirty, len(untracked_files),
-                           commit_message, commit_ts, commit_hash, 
-                           ])
+                untracked_files, modified_files, deleted_files \
+                                                    = self._one_repo_stats(remote_inspector)
+            local_or_remote                         = RS.REMOTE_REPO
+            data_l.append([repo_name, local_or_remote, current_branch, 
+                           len(untracked_files), len(modified_files), len(deleted_files),
+                        commit_message, commit_ts, commit_hash, 
+                        ])
 
         result_df                                       = _pd.DataFrame(data = data_l, columns = columns)
 
@@ -318,13 +356,13 @@ class RepoAdministration():
         '''
         result_dict                                     = {}
         if repos_in_scope_l is None:
-            repos_in_scope_l                            = [repo_info.name for repo_info in self.repo_bundle.bundled_repos()]
+            repos_in_scope_l                            = self.repo_names()
         for repo_name in repos_in_scope_l:
-            local_repo                                  = Repo(self.local_root + "/" + repo_name)
-            remote_repo                                 = Repo(self.local_root + "/" + repo_name)
+            local_inspector                             = RepoInspectorFactory.findInspector(self.local_root, repo_name)
+            remote_inspector                            = RepoInspectorFactory.findInspector(self.remote_root,repo_name)
 
-            local_log_df                                = self._log_to_dataframe(local_repo)
-            remote_log_df                               = self._log_to_dataframe(remote_repo)
+            local_log_df                                = local_inspector.log_to_dataframe()
+            remote_log_df                               = remote_inspector.log_to_dataframe()
             result_dict[repo_name]                      = {RepoStatics.LOCAL_REPO:      local_log_df,
                                                            RepoStatics.REMOTE_REPO:     remote_log_df}
 
@@ -360,93 +398,30 @@ class RepoAdministration():
 
         return lines
 
-    def _log_to_dataframe(self, repo):
-        '''
-        :param git.Repo Repo: object representing a GIT repo whose log information we want to get
-        :return: A DataFrame with log information for the given ``repo``. Each row in the DataFrame
-            represents a file that was committed, so there are typically multiple rows per commit.
-        :rtype: :class:`pandas.DataFrame`
-        '''
-        git                                             = repo.git
-        log                                             = git.log("--name-only")
-        commits                                         = log.split("commit ")
-        commits                                         = [c for c in commits if len(c)>0] # Filter out spurious tokens
-
-        commit_nb_l                                     = []
-        commit_date_l                                   = []
-        summary_l                                       = []
-        commit_file_nb_l                                = []
-        commit_file_l                                   = []
-        commit_hash_l                                   = []
-        commit_author_l                                 = []
-
-
-        for commit_nb in reversed(range(len(commits))): # Use reversed to list commits in the order in which they were made
-            commit                                      = commits[commit_nb]
-            lines                                       = commit.split("\n")
-            '''
-            The business logic below is inspired by this observation: if we print the lines
-            with a prefix for the line number, by doing
-
-                    for idx in range(len(lines)):
-                        line = lines[idx]
-                        print(str(idx) + ": " + line)
-
-            then the result is something like
-
-                0: 0d7521b185f4ba7748ca1e78f990b61a4bdfd8b8
-                1: Author: Alejandro Hernandez <alejandro.hernandez@finastra.com>
-                2: Date:   Wed May 17 14:03:58 2023 -0700
-                3: 
-                4:     [LEA UserStory 1455] Moved notebooks to ops repo
-                5: 
-                6: src/notebooks/.ipynb_checkpoints/GIT dashboard-checkpoint.ipynb
-                7: src/notebooks/.ipynb_checkpoints/Scratch-checkpoint.ipynb
-                8: src/notebooks/.ipynb_checkpoints/exploreClassifier-checkpoint.ipynb
-
-                        ...             ...
-
-            UPSHOT: this tells that lines 0,1,2,4 give us the hash, author, date and summary, and lines 6+ the 
-                files that changed.
-            '''
-            hash                                        = lines[0]
-            author                                      = lines[1].strip("Author:").strip()
-            date                                        = lines[2].strip("Date:").strip()
-            summary                                     = lines[4].strip()
-            OFFSET                                      = 6
-            for idx in range(OFFSET, len(lines)):
-                file                                    = lines[idx]
-
-                commit_nb_l.                            append(commit_nb)
-                commit_date_l.                          append(date)
-                summary_l.                              append(summary)
-                commit_file_nb_l.                       append(idx - OFFSET)
-                commit_file_l.                          append(file)
-                commit_hash_l.                          append(hash)
-                commit_author_l.                        append(author)
-        
-        log_dict                                        = {RepoStatics.COMMIT_NB_COL:       commit_nb_l,
-                                                           RepoStatics.COMMIT_DATE_COL:     commit_date_l,
-                                                           RepoStatics.COMMIT_SUMMARY_COL:  summary_l,
-                                                           RepoStatics.COMMIT_FILE_NB_COL:  commit_file_nb_l,
-                                                           RepoStatics.COMMIT_FILE_COL:     commit_file_l,
-                                                           RepoStatics.COMMIT_HASH_COL:     commit_hash_l,
-                                                           RepoStatics.COMMIT_AUTHOR_COL:   commit_author_l}
-
-        log_df                                          = _pd.DataFrame(log_dict)
-        return log_df
-
-    def _one_repo_stats(self, repo):
+    def _one_repo_stats(self, repo: RepoInspector):
         '''
         '''
-        repo_name                                       = Path(repo.working_dir).name
-        current_branch                                  = repo.active_branch.name
-        commit                                          = repo.active_branch.commit
-        commit_message                                  = commit.message
-        commit_ts                                       = Timestamp.from_datetime(commit.committed_datetime).timestamp
-        commit_hash                                     = str(commit)
-        is_dirty                                        = repo.is_dirty()
-        untracked_files                                 = repo.untracked_files
+        repo_name                                       = repo.repo_name
+        current_branch                                  = repo.current_branch()
 
-        return repo_name, current_branch, commit_message, commit_ts, commit_hash, is_dirty, untracked_files
+        commit_info                                     = repo.last_commit()
+        commit_hash                                     = commit_info.commit_hash
+        commit_message                                  = commit_info.commit_msg
+        commit_ts                                       = commit_info.commit_ts
 
+        untracked_files                                 = repo.untracked_files()
+        modified_files                                  = repo.modified_files()
+        deleted_files                                   = repo.deleted_files()
+
+        return repo_name, current_branch, commit_message, commit_ts, commit_hash, \
+            untracked_files, modified_files, deleted_files
+
+
+    def log_info(self, msg):
+        '''
+        Logs the ``msg`` at the INFO log level.
+
+        :param str msg: Information to be logged
+        '''
+        #Application.app().log(msg, Logger.LEVEL_INFO, show_caller=False)
+        Logger.log_info(msg)

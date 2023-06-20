@@ -15,8 +15,9 @@ class RepoStatics(abc.ABC):
     LAST_COMMIT_COL                                     = "Last commit"
     LAST_COMMIT_TIMESTAMP_COL                           = "Last commit timestamp"
     LAST_COMMIT_HASH_COL                                = "Last commit hash"
-    IS_DIRTY_COL                                        = "Is dirty"
     NB_UNTRACKED_FILES_COL                              = "# Untracked files"
+    NB_MODIFIED_FILES_COL                               = "# Modified files"
+    NB_DELETED_FILES_COL                                = "# Deleted files"
 
     LOCAL_REPO                                          = "Local"
     REMOTE_REPO                                         = "Remote"

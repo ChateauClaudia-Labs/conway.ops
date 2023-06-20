@@ -15,7 +15,7 @@ class Chassis_RepoBundle(RepoBundle):
         :rtype: List[str]
         '''
         REPO_conway_acceptance                         = "conway.acceptance"
-        REPO_conway_acceptance_DOCS                    = "conway.acceptance_docs"
+        REPO_conway_acceptance_DOCS                    = "conway.acceptance.docs"
 
         repo_info_l                                     = super().bundled_repos()
         repo_info_l.append(RepoInfo(REPO_conway_acceptance,

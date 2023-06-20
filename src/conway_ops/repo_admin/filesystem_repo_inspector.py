@@ -1,10 +1,12 @@
 import git
 import datetime as _dt
 
-from conway.observability.logger                            import Logger
-from conway.util.timestamp                                  import Timestamp
+from conway.observability.logger                                    import Logger
+from conway.util.timestamp                                          import Timestamp
 
-from conway_ops.repo_admin.repo_inspector                   import RepoInspector, CommitInfo, CommittedFileInfo
+from conway_ops.repo_admin.repo_inspector                           import RepoInspector, CommitInfo, CommittedFileInfo
+from conway_ops.repo_admin.git_client                               import GitClient
+
 
 class FileSystem_RepoInspector(RepoInspector):
 
@@ -21,7 +23,7 @@ class FileSystem_RepoInspector(RepoInspector):
 
         super().__init__(parent_url, repo_name)
 
-        self.executor                       = git.cmd.Git(parent_url + "/" + repo_name)
+        self.executor                       = GitClient(parent_url + "/" + repo_name)
 
     def init_repo(self):
         '''
@@ -305,7 +307,7 @@ class FileSystem_RepoInspector(RepoInspector):
 
         If anything goes wrong it raises an exception.
         '''    
-        executor            = git.cmd.Git(self.parent_url + "/" + self.repo_name) 
+        executor            = GitClient(self.parent_url + "/" + self.repo_name) 
 
         status1             = executor.execute(command = 'git checkout ' + to_branch)
         Logger.log_info("Checkout '" + to_branch + "':\n" + str(status1))
@@ -321,7 +323,7 @@ class FileSystem_RepoInspector(RepoInspector):
 
         If anything goes wrong it raises an exception.
         '''
-        executor            = git.cmd.Git(self.parent_url + "/" + self.repo_name) 
+        executor            = GitClient(self.parent_url + "/" + self.repo_name) 
 
         status1             = executor.execute(command = 'git checkout ' + branch)
         Logger.log_info("Checkout '" + branch + "':\n" + str(status1))
@@ -336,7 +338,7 @@ class FileSystem_RepoInspector(RepoInspector):
         :param str branch: repo local branch to update from the remote.
         '''
         Logger.log_info("\t\t*** using " + str(self.parent_url) + " ***")
-        executor            = git.cmd.Git(self.parent_url + "/" + self.repo_name) 
+        executor            = GitClient(self.parent_url + "/" + self.repo_name) 
 
         status1             = executor.execute(command = 'git checkout ' + branch)
         Logger.log_info("Checkout '" + branch + "':\n" + str(status1))

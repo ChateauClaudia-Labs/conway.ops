@@ -1,18 +1,20 @@
-from pathlib                                                    import Path
-import pandas                                                   as _pd
+from pathlib                                                        import Path
+import pandas                                                       as _pd
 import xlsxwriter
-import git                                                      as _git
+import git                                                          as _git
 
-from conway.application.application                             import Application
-from conway.observability.logger                                import Logger
+from conway.application.application                                 import Application
+from conway.observability.logger                                    import Logger
 
-from conway.reports.report_writer                               import ReportWriter
+from conway.reports.report_writer                                   import ReportWriter
 
-from conway_ops.repo_admin.repo_statics                         import RepoStatics
-from conway_ops.repo_admin.repo_inspector_factory               import RepoInspectorFactory
-from conway_ops.repo_admin.repo_inspector                       import RepoInspector
-from conway_ops.repo_admin.filesystem_repo_inspector            import FileSystem_RepoInspector
-from conway_ops.repo_admin.repo_bundle                          import RepoBundle
+from conway_ops.repo_admin.repo_statics                             import RepoStatics
+from conway_ops.repo_admin.repo_inspector_factory                   import RepoInspectorFactory
+from conway_ops.repo_admin.repo_inspector                           import RepoInspector
+from conway_ops.repo_admin.filesystem_repo_inspector                import FileSystem_RepoInspector
+from conway_ops.repo_admin.repo_bundle                              import RepoBundle
+from conway_ops.repo_admin.git_client                               import GitClient
+
 
 class RepoAdministration():
 
@@ -91,7 +93,7 @@ class RepoAdministration():
         :return: branches in local repo
         :rtype: list[str]
         '''
-        executor                = _git.cmd.Git(self.local_root + "/" + repo_name)
+        executor                = GitClient(self.local_root + "/" + repo_name)
 
         git_result              = executor.execute("git branch")
 
@@ -110,7 +112,7 @@ class RepoAdministration():
             ``destination_branch``. Returns False otherwise.
         :rtype: bool
         '''
-        executor                = _git.cmd.Git(self.local_root + "/" + repo_name)
+        executor                = GitClient(self.local_root + "/" + repo_name)
 
         git_result              = executor.execute("git branch --merged " + str(destination_branch))
 

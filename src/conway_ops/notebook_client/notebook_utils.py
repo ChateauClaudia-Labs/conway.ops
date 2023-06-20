@@ -93,7 +93,8 @@ class NotebookUtils(abc.ABC):
         Remembers environmental information as part of self, and displays it.
         '''
         REPO_NAME                       = _os.path.basename(self.repo_directory)
-        REPO_BRANCH                     = _git.cmd.Git(self.repo_directory).execute("git rev-parse --abbrev-ref HEAD")
+        REPO_BRANCH                     = _git.cmd.Git(self.repo_directory).execute(command = ["git", "rev-parse", "--abbrev-ref", "HEAD"])#,
+                                                                                    #env     = _os.environ)
 
         APP_INSTALLATION_PATH           = _os.path.dirname(self.repo_directory) 
         APP_INSTALLATION                = _os.path.basename(APP_INSTALLATION_PATH)

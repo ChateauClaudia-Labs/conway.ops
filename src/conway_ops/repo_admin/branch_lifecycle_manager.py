@@ -142,20 +142,19 @@ class BranchLifecycleManager(RepoAdministration):
             remote_inspector.pull_request(from_branch = self.OPERATE_BRANCH, to_branch = self.MASTER_BRANCH)
 
             # Update master => integration (remote)
-            remote_inspector.pull_request(from_branch = self.MASTER_BRANCH, to_branch = self.OPERATE_BRANCH)
+            remote_inspector.pull_request(from_branch = self.MASTER_BRANCH, to_branch = self.INTEGRATION_BRANCH)
 
             # Make sure we end up in the master branch after updating the remote operate branch
             remote_inspector.checkout(self.MASTER_BRANCH)
 
             self.log_info("\n\t\t ***** In the local...")
-            # Now update local integration from de
+            # Now update local integration from the remote
             local_inspector.update_local(self.INTEGRATION_BRANCH)
 
             # Make sure to come back to the operate branch (as above command moved us to the integration branch)
             local_inspector.checkout(self.OPERATE_BRANCH)
 
 
-        raise ValueError("Unimplemented")
 
     def complete_feature(self, feature_branch, remove_feature_branch=False):
         '''

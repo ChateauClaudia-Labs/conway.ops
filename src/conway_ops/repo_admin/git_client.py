@@ -34,7 +34,7 @@ class GitClient():
         :rtype: str
         '''
 
-        # GOTCHA: On Linus, GitPython requires commands with arguments to be passed as a list, not
+        # GOTCHA: On Linux, GitPython requires commands with arguments to be passed as a list, not
         #       as a string. Thus, a command like "git status" should be passed in Linux as
         #       ["git", "status"]
         #

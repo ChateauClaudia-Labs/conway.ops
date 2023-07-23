@@ -47,6 +47,7 @@ class NotebookUtils(abc.ABC):
         import random
         import xlsxwriter
         import git
+        import inspect
 
         self.time                       = time
         self.Path                       = Path
@@ -55,6 +56,7 @@ class NotebookUtils(abc.ABC):
         self.random                     = random
         self.xlsxwriter                 = xlsxwriter
         self.git                        = git
+        self.inspect                    = inspect
 
     def _import_conway_dependencies(self):
         '''
@@ -68,6 +70,7 @@ class NotebookUtils(abc.ABC):
         #   before this method is called
         #
         from conway_ops.repo_admin.branch_lifecycle_manager                     import BranchLifecycleManager
+        from conway_ops.repo_admin.repo_administration                          import RepoAdministration, GitUsage
         from conway_ops.repo_admin.chassis_repo_bundle                          import Chassis_RepoBundle
         from conway_ops.repo_admin.repo_bundle_subset                           import RepoBundleSubset
         
@@ -78,6 +81,8 @@ class NotebookUtils(abc.ABC):
         from conway.reports.report_writer                                       import ReportWriter
 
         self.BranchLifecycleManager             = BranchLifecycleManager
+        self.GitUsage                           = GitUsage
+        self.RepoAdministration                 = RepoAdministration
         self.Chassis_RepoBundle                 = Chassis_RepoBundle
         self.RepoBundleSubset                   = RepoBundleSubset
         self.DataFrameUtils                     = DataFrameUtils

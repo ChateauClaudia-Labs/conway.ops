@@ -2,6 +2,7 @@ from pathlib                                                        import Path
 import pandas                                                       as _pd
 import xlsxwriter
 import git                                                          as _git
+from enum                                                           import Enum
 
 from conway.application.application                                 import Application
 from conway.observability.logger                                    import Logger
@@ -14,6 +15,91 @@ from conway_ops.repo_admin.repo_inspector                           import RepoI
 from conway_ops.repo_admin.filesystem_repo_inspector                import FileSystem_RepoInspector
 from conway_ops.repo_admin.repo_bundle                              import RepoBundle
 from conway_ops.repo_admin.git_client                               import GitClient
+
+
+class GitUsage (Enum):
+
+    no_git_usage                                    = 0
+    git_local_only                                  = 1
+    git_local_and_remote                            = 2
+
+
+class _ProjectCreationContext:
+
+    def __init__(self, repo_admin, repo_name, git_usage=GitUsage.git_local_and_remote, work_branch_name=None):
+        '''
+        This class is a context manager intended to be used when creating a new repo for a project.
+        It takes care of the GIT-related aspects of creating such a repo, so that the logic surrounded by this
+        context manager can focus on the "functional" aspects, i.e., populating the content of interest in 
+        the filesystem's folder for the repo (what in GIT corresponds to the work directory)
+        '''
+        self.repo_admin                             = repo_admin
+        self.repo_name                              = repo_name
+        self.git_usage                              = git_usage
+        self.work_branch_name                       = work_branch_name
+
+        # These are created upon entering the context
+        self.repos_root                             = None
+        self.git_repo                               = None
+
+        # These are set by the business logic running within the context
+        self.files_l                                = None
+
+    def __enter__(self):
+        '''
+        Returns self
+        
+        '''
+        local_url                                   = self.repo_admin.local_root + "/" + self.repo_name
+        Path(local_url).mkdir(parents=True, exist_ok=False)        
+
+        if self.git_usage == GitUsage.git_local_and_remote:
+            self.repos_root                         = self.repo_admin.remote_root
+            # Create folders. They shouldn't already exist, since we are creating a brand new project
+            Path(self.repos_root + "/" + self.repo_name).mkdir(parents=True, exist_ok=False)
+            inspector                               = FileSystem_RepoInspector(self.repos_root, self.repo_name)
+            # This creates the master branch (in remote)
+            self.git_repo                           = inspector.init_repo() 
+        elif self.git_usage == GitUsage.git_local_only:
+            self.repos_root                         = self.repo_admin.local_root
+            inspector                               = FileSystem_RepoInspector(self.repos_root, self.repo_name)
+            # This creates the master branch (in local)
+            self.git_repo                           = inspector.init_repo() 
+        else:
+            self.repos_root                         = self.repo_admin.local_root
+            self.git_repo                           = None
+
+        return self
+
+    def __exit__(self, exc_type, exc_value, exc_tb):
+
+        if self.git_usage != GitUsage.no_git_usage:
+            self.git_repo.index.add(self.files_l)
+            self.git_repo.index.commit("Initial commit")            
+
+            master_branch                           = self.git_repo.active_branch
+            work_branch                             = self.git_repo.create_head(self.work_branch_name)
+            work_branch.checkout()
+
+            if self.git_usage == GitUsage.git_local_and_remote:
+                # In this case the self.git_repo is the remote, and need to create the local
+                local_url                           = self.repo_admin.local_root + "/" + self.repo_name
+
+                local_repo                          = self.git_repo.clone(local_url)
+
+                # Now come back to master branch on the remote, so that if local tries to do a git push,
+                # the push succeeds (i.e., avoid errors of pushing to a remote branch arising from that branch
+                # being checked out in the remote, so move remote to a branch to which pushes are not made, i.e., to master).
+                #
+                master_branch.checkout()
+
+    ''' TODO - figure out if we want to handle some types of exceptions
+    if isinstance(exc_value, IndeExError):
+        # Handle IndexError here...
+        print(f"An exception occurred in your with block: {exc_type}")
+        print(f"Exception message: {exc_value}")
+        return True
+    '''
 
 
 class RepoAdministration():
@@ -33,7 +119,7 @@ class RepoAdministration():
         self.remote_root                                = remote_root
         self.repo_bundle                                = repo_bundle
 
-    def create_project(self, project_name, work_branch_name):
+    def create_project(self, project_name, work_branch_name, git_usage=GitUsage.git_local_and_remote):
         '''
         Creates all the repos required for a project as per standard patterns of the 
         :class:``RepoBundle``.
@@ -48,45 +134,46 @@ class RepoAdministration():
         '''
         bundle                                          = RepoBundle(project_name)
         for repo_info in bundle.bundled_repos():
-            remote_url                                  = self.remote_root + "/" + repo_info.name
-            local_url                                   = self.local_root + "/" + repo_info.name
 
-            # This creates the master branch
-            #
-            #   GOTCHA: unlike other methods in this class, we only support file system repos
-            #           (not GIT Hub repos)
-            #
-            inspector                                   = FileSystem_RepoInspector(self.remote_root, repo_info.name)
-            remote_repo                                 = inspector.init_repo() 
-
-            # Avoid having an empty remote, so that it has a head and we can create branches.
-            # Accomplish that by adding a scaffold README.md and a scaffold .gitignore
-            README_FILENAME                             = "README.md"
-            with open(remote_url + "/" + README_FILENAME, 'w') as f:
-                f.write(repo_info.description + " for application '" + project_name + "'.\n")
-
-            GIT_IGNORE_FILENAME                         = ".gitignore"
-            with open(remote_url + "/" + GIT_IGNORE_FILENAME, 'w') as f:
-                for line in self._git_ignore_content():
-                    f.write(line + "\n")
-
-
-            remote_repo.index.add([README_FILENAME, GIT_IGNORE_FILENAME])
-            remote_repo.index.commit("Initial commit")            
-
-            master_branch                               = remote_repo.active_branch
-            work_branch                                 = remote_repo.create_head(work_branch_name)
-            work_branch.checkout()
-            
-            local_repo                                  = remote_repo.clone(local_url)
-
-            # Now come back to master branch on the remote, so that if local tries to do a git push,
-            # the push succeeds (i.e., avoid errors of pushing to a remote branch arising from that branch
-            # being checked out in the remote, so move remote to a branch to which pushes are not made, i.e., to master).
-            #
-            master_branch.checkout()
-
+            with _ProjectCreationContext(repo_admin=self, repo_name=repo_info.name, 
+                                         git_usage          = git_usage,
+                                         work_branch_name   = work_branch_name) as ctx:
+                
+                ctx.files_l                             = self._populate_filesystem_repo(repos_root   = ctx.repos_root, 
+                                                                                            repo_info    = repo_info)
         return bundle
+    
+
+    
+    def _populate_filesystem_repo(self, repos_root, repo_info):
+        '''
+        Populates all generated content for a new repo.
+
+        This method is supposed to be called within the ``_ProjectCreationContext`` context manager, so that
+        all its preconditions are met. For example, that certain GIT repos already have been created by the
+        time this method is called, since they can't be created after this method is called (would result in a
+        GIT error, as the working folder would not be empty after this method runs)
+        '''
+        repo_url                                   = f"{repos_root}/{repo_info.name}"
+
+        Path(repo_url).mkdir(parents=True, exist_ok=True)
+ 
+        # Avoid having an empty repo, so that it has a head and we can create branches.
+        # Accomplish that by adding a scaffold README.md and a scaffold .gitignore
+        README_FILENAME                             = "README.md"
+        with open(f"{repo_url}/{README_FILENAME}", 'w') as f:
+            f.write(f"{repo_info.description} for application '{repo_info.name}'.\n")
+
+        GIT_IGNORE_FILENAME                         = ".gitignore"
+        with open(f"{repo_url}/{GIT_IGNORE_FILENAME}", 'w') as f:
+            for line in self._git_ignore_content():
+                f.write(line + "\n")
+
+        return [README_FILENAME, GIT_IGNORE_FILENAME]
+    
+
+
+
     
     def branches(self, repo_name):
         '''

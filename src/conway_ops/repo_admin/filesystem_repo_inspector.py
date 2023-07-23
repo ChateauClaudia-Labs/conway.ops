@@ -112,7 +112,14 @@ class FileSystem_RepoInspector(RepoInspector):
         #
         # so we must split it by the delimeter "|" and parse each token as required
         #
-        tokens                              = raw.split("|")
+        #   GOTCHA:
+        #       In Linux, it seems that raw is surrounded by double quotes, so it is something like:
+        #
+        #   '"a72013ecceca532f6d99453d4a9a5a67d5ce8a90|2023-06-05|Added logic to create submissions directory if missing"'
+        #
+        #   So for that reason we strip off any leading or trailing double quote
+        #
+        tokens                              = raw.strip('"').split("|")
         commit_hash                         = tokens[0]
         
         

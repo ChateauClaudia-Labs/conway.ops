@@ -1,10 +1,9 @@
 from pathlib                                                        import Path
+import os                                                           as _os
 import pandas                                                       as _pd
 import xlsxwriter
-import git                                                          as _git
 from enum                                                           import Enum
 
-from conway.application.application                                 import Application
 from conway.observability.logger                                    import Logger
 
 from conway.reports.report_writer                                   import ReportWriter
@@ -15,6 +14,7 @@ from conway_ops.repo_admin.repo_inspector                           import RepoI
 from conway_ops.repo_admin.filesystem_repo_inspector                import FileSystem_RepoInspector
 from conway_ops.repo_admin.repo_bundle                              import RepoBundle
 from conway_ops.repo_admin.git_client                               import GitClient
+from conway_ops.scaffolding.scaffold_generator                      import ScaffoldGenerator
 
 
 class GitUsage (Enum):
@@ -73,6 +73,9 @@ class _ProjectCreationContext:
 
     def __exit__(self, exc_type, exc_value, exc_tb):
 
+        if not exc_value is None: # Propagate the exception. TODO: Maybe should put cleanup code for any GIT repos previously created
+            return False
+
         if self.git_usage != GitUsage.no_git_usage:
             self.git_repo.index.add(self.files_l)
             self.git_repo.index.commit("Initial commit")            
@@ -93,13 +96,6 @@ class _ProjectCreationContext:
                 #
                 master_branch.checkout()
 
-    ''' TODO - figure out if we want to handle some types of exceptions
-    if isinstance(exc_value, IndeExError):
-        # Handle IndexError here...
-        print(f"An exception occurred in your with block: {exc_type}")
-        print(f"Exception message: {exc_value}")
-        return True
-    '''
 
 
 class RepoAdministration():
@@ -113,13 +109,14 @@ class RepoAdministration():
 
     :param RepoBundle repo_bundle: Object encapsulating the names of the GIT repos for which joint GIT operations 
         are to be done by this :class:`RepoAdministration` instance.
+        
     '''
     def __init__(self, local_root, remote_root, repo_bundle):
         self.local_root                                 = local_root
         self.remote_root                                = remote_root
         self.repo_bundle                                = repo_bundle
 
-    def create_project(self, project_name, work_branch_name, git_usage=GitUsage.git_local_and_remote):
+    def create_project(self, project_name, work_branch_name, scaffold_spec=None, git_usage=GitUsage.git_local_and_remote):
         '''
         Creates all the repos required for a project as per standard patterns of the 
         :class:``RepoBundle``.
@@ -129,23 +126,40 @@ class RepoAdministration():
             both in the local and the remote and which is how the local pushes work to the remote.
             NB: By default, the master branch only exists in the remote, hence the need for the work_branch_name.
 
+        :param ScaffoldSpec scaffold_spec: Object encapsulating the code patterns for which sample code should be included
+            in the newly created project. By default is is None, in which case the only files generated in the new
+            project will be a ``README.md`` and ``.gitignore``.
+
         :return: a :class:``RepoBundle`` with information about all the repos created for project ``project_name``.
         :rtype: RepoBundle
         '''
         bundle                                          = RepoBundle(project_name)
+        created_files_l                                 = []
         for repo_info in bundle.bundled_repos():
 
             with _ProjectCreationContext(repo_admin=self, repo_name=repo_info.name, 
                                          git_usage          = git_usage,
                                          work_branch_name   = work_branch_name) as ctx:
                 
-                ctx.files_l                             = self._populate_filesystem_repo(repos_root   = ctx.repos_root, 
-                                                                                            repo_info    = repo_info)
-        return bundle
+                ctx.files_l                            = self._populate_filesystem_repo(repos_root         = ctx.repos_root, 
+                                                                                            repo_info       = repo_info,
+                                                                                            scaffold_spec   = scaffold_spec)
+                created_files_l.append(ctx.files_l)
+
+        # Now generate the config folder, which is external to all repos since it is runtime configuration that must
+        # be set by the operator, not the developer
+        # It only can be generated when there is a scaffolding spec
+        if not scaffold_spec is None:
+            config_root                                 = f"{ctx.repos_root}/config"
+            scaffold_gen                                = ScaffoldGenerator(config_root, scaffold_spec)
+            config_files_l                              = [_os.path.relpath(f, start= config_root) for f in scaffold_gen.generate("config")]
+            created_files_l.append(config_files_l)
+
+        return bundle # return bundle, created_files_l
     
 
     
-    def _populate_filesystem_repo(self, repos_root, repo_info):
+    def _populate_filesystem_repo(self, repos_root, repo_info, scaffold_spec):
         '''
         Populates all generated content for a new repo.
 
@@ -158,18 +172,36 @@ class RepoAdministration():
 
         Path(repo_url).mkdir(parents=True, exist_ok=True)
  
-        # Avoid having an empty repo, so that it has a head and we can create branches.
-        # Accomplish that by adding a scaffold README.md and a scaffold .gitignore
-        README_FILENAME                             = "README.md"
-        with open(f"{repo_url}/{README_FILENAME}", 'w') as f:
-            f.write(f"{repo_info.description} for application '{repo_info.name}'.\n")
+        if not scaffold_spec is None:
+            scaffold_gen                                = ScaffoldGenerator(repo_url, scaffold_spec)
+            # The ScaffoldGenerator will return a list of generated files, with their absolute path. However, this method
+            # needs to strip the root folder for the repo, to avoid exceptions, since GIT operations need the relative
+            # path of the files under the repo.
+            #
+            # For example, the ScaffoldGenerator may return paths like:
+            # 
+            #       /mnt/c/Users/aleja/Documents/Code/conway/conway.scenarios/8101/ACTUALS@latest/bundled_repos_remote/cash.svc/.gitignore
+            #
+            #  but this method would need to return only the relative path under the "cash.svc" repo:
+            #
+            #       .gitignore
+            #
+            files_l                                     = [_os.path.relpath(f, start= repo_url) for f in scaffold_gen.generate(repo_info.subproject)]
+        else:
+            # Avoid having an empty repo, so that it has a head and we can create branches.
+            # Accomplish that by adding a scaffold README.md and a scaffold .gitignore
+            README_FILENAME                         = "README.md"
+            with open(f"{repo_url}/{README_FILENAME}", 'w') as f:
+                f.write(f"{repo_info.description} for application '{repo_info.name}'.\n")
 
-        GIT_IGNORE_FILENAME                         = ".gitignore"
-        with open(f"{repo_url}/{GIT_IGNORE_FILENAME}", 'w') as f:
-            for line in self._git_ignore_content():
-                f.write(line + "\n")
+            GIT_IGNORE_FILENAME                     = ".gitignore"
+            with open(f"{repo_url}/{GIT_IGNORE_FILENAME}", 'w') as f:
+                for line in self._git_ignore_content():
+                    f.write(line + "\n")
 
-        return [README_FILENAME, GIT_IGNORE_FILENAME]
+            files_l                                 =  [README_FILENAME, GIT_IGNORE_FILENAME]
+
+        return files_l
     
 
 
@@ -256,7 +288,8 @@ class RepoAdministration():
             repo_environment                            = RS.REMOTE_REPO
 
         # Check that we can move out of current branch safely, i.e., there is no uncommitted work
-        stats_df                                        = self.repo_stats(repos_in_scope_l=repos_in_scope_l)
+        stats_df                                        = self.repo_stats(repos_in_scope_l=repos_in_scope_l,
+                                                                          git_usage = GitUsage.git_local_and_remote)
         stats_df                                        = stats_df[stats_df[RS.LOCAL_OR_REMOTE_COL]==repo_environment]
         def _bad_row(row):
             '''
@@ -293,7 +326,10 @@ class RepoAdministration():
             print("\n-----------" + repo_name + "-----------\n")
             print("\tStatus:\t\t" + str(status))
 
-    def create_repo_report(self, publications_folder, repos_in_scope_l=None, mask_nondeterministic_data=False):
+    def create_repo_report(self, publications_folder, 
+                           repos_in_scope_l             = None, 
+                           git_usage                    = GitUsage.git_local_and_remote,
+                           mask_nondeterministic_data   = False):
         '''
         Creates an Excel report with multiple worksheets, as follows:
 
@@ -307,6 +343,8 @@ class RepoAdministration():
             ``/Operator Reports/DevOps/`` under this root ``publications_folder``.
         :param list[str] repos_in_scope_l: A list of names for GIT repos for which stats are requested. If set to None, 
             then it will default to provide stats for the repos ``self.repo_bundle``
+        :param GitUsage get_usage: enum used to determine which GIT areas were created, if any, to scope the report to the GIT
+            areas actually used.
         :param bool mask_nondeterministic_data: If True, then any data that is non-deterministic (such as dates or hash 
             codes) is masked. This is False by default. Typical use case for masking is in test cases that need 
             determinism.
@@ -326,7 +364,7 @@ class RepoAdministration():
         writer                                                  = ReportWriter()
 
         # Now generate and save the stats worksheet
-        stats_df                                                = self.repo_stats(repos_in_scope_l)
+        stats_df                                                = self.repo_stats(git_usage, repos_in_scope_l)
         if mask_nondeterministic_data:
             stats_df[RepoStatics.LAST_COMMIT_TIMESTAMP_COL]     = MASKED_MSG
             stats_df[RepoStatics.LAST_COMMIT_HASH_COL]          = MASKED_MSG
@@ -340,7 +378,7 @@ class RepoAdministration():
         writer.populate_excel_worksheet(stats_df, workbook, worksheet, widths_dict=widths_dict)
         
         # Now generate and save the multiple log worksheets
-        all_repos_logs_dict                                     = self.repo_logs(repos_in_scope_l)
+        all_repos_logs_dict                                     = self.repo_logs(git_usage, repos_in_scope_l)
         for repo_name in all_repos_logs_dict.keys():
             a_repo_logs_dict                                    = all_repos_logs_dict[repo_name]
             for instance_type in a_repo_logs_dict.keys(): # instance_type refers to local vs remote repos
@@ -380,7 +418,7 @@ class RepoAdministration():
         return sheet_name
 
 
-    def repo_stats(self, repos_in_scope_l=None):
+    def repo_stats(self, git_usage, repos_in_scope_l=None):
         '''
         :param list[str] repos_in_scope_l: A list of names for GIT repos for which stats are requested. If set to None, 
             then it will default to provide stats for names of ``self.repo_bundle.bundled_repos()``
@@ -405,36 +443,42 @@ class RepoAdministration():
         if repos_in_scope_l is None:
             repos_in_scope_l                            = self.repo_names()
         for repo_name in repos_in_scope_l:
-            local_inspector                             = RepoInspectorFactory.findInspector(self.local_root, repo_name)
 
-            repo_name, current_branch, \
-                commit_message, commit_ts, commit_hash, \
-                untracked_files, modified_files, deleted_files \
+            if git_usage in [GitUsage.git_local_and_remote, GitUsage.git_local_only]:
+                local_inspector                         = RepoInspectorFactory.findInspector(self.local_root, repo_name)
+
+                repo_name, current_branch, \
+                    commit_message, commit_ts, commit_hash, \
+                    untracked_files, modified_files, deleted_files \
                                                         = self._one_repo_stats(local_inspector)
-            local_or_remote                             = RS.LOCAL_REPO
-            data_l.append([repo_name, local_or_remote, current_branch, 
-                           len(untracked_files), len(modified_files), len(deleted_files),
-                           commit_message, commit_ts, commit_hash, 
-                           ])
+                local_or_remote                         = RS.LOCAL_REPO
+                data_l.append([repo_name, local_or_remote, current_branch, 
+                            len(untracked_files), len(modified_files), len(deleted_files),
+                            commit_message, commit_ts, commit_hash, 
+                            ])
 
-            remote_inspector                            = RepoInspectorFactory.findInspector(self.remote_root, repo_name)
+            if git_usage in [GitUsage.git_local_and_remote]:
+                remote_inspector                        = RepoInspectorFactory.findInspector(self.remote_root, repo_name)
 
-            repo_name, current_branch, \
-                commit_message, commit_ts, commit_hash, \
-                untracked_files, modified_files, deleted_files \
-                                                    = self._one_repo_stats(remote_inspector)
-            local_or_remote                         = RS.REMOTE_REPO
-            data_l.append([repo_name, local_or_remote, current_branch, 
-                           len(untracked_files), len(modified_files), len(deleted_files),
-                        commit_message, commit_ts, commit_hash, 
-                        ])
+                repo_name, current_branch, \
+                    commit_message, commit_ts, commit_hash, \
+                    untracked_files, modified_files, deleted_files \
+                                                        = self._one_repo_stats(remote_inspector)
+                local_or_remote                         = RS.REMOTE_REPO
+                data_l.append([repo_name, local_or_remote, current_branch, 
+                            len(untracked_files), len(modified_files), len(deleted_files),
+                            commit_message, commit_ts, commit_hash, 
+                            ])
 
         result_df                                       = _pd.DataFrame(data = data_l, columns = columns)
 
         return result_df
     
-    def repo_logs(self, repos_in_scope_l=None):
+    def repo_logs(self, git_usage, repos_in_scope_l=None):
         '''
+        :param GitUsage get_usage: enum used to determine which GIT areas were created, if any, to scope the report to the GIT
+        areas actually used.
+
         :param list[str] repos_in_scope_l: A list of names for GIT repos for which stats are requested. If set to None, then 
             it will default to provide stats for ``self.repo_names``
         :return: Logs for each of the repos named in ``repos_in_scope_l``. For each repo name, two DataFrames are produced, 
@@ -443,18 +487,24 @@ class RepoAdministration():
             ``RepoStatics.LOCAL_REPO`` and ``RepoStatics.REMOTE_REPO``, and the values are the log DataFrames.
         :rtype: :class:`dict`
         '''
-        result_dict                                     = {}
+        result_dict                                             = {}
         if repos_in_scope_l is None:
-            repos_in_scope_l                            = self.repo_names()
+            repos_in_scope_l                                    = self.repo_names()
         for repo_name in repos_in_scope_l:
-            local_inspector                             = RepoInspectorFactory.findInspector(self.local_root, repo_name)
-            remote_inspector                            = RepoInspectorFactory.findInspector(self.remote_root,repo_name)
+            result_dict[repo_name]                              = {}
 
-            local_log_df                                = local_inspector.log_to_dataframe()
-            remote_log_df                               = remote_inspector.log_to_dataframe()
-            result_dict[repo_name]                      = {RepoStatics.LOCAL_REPO:      local_log_df,
-                                                           RepoStatics.REMOTE_REPO:     remote_log_df}
+            local_log_df                                        = None
+            if git_usage in [GitUsage.git_local_and_remote, GitUsage.git_local_only]:
+                local_inspector                                 = RepoInspectorFactory.findInspector(self.local_root, repo_name)
+                local_log_df                                    = local_inspector.log_to_dataframe()
+                result_dict[repo_name][RepoStatics.LOCAL_REPO]  = local_log_df
 
+            remote_log_df                                       = None
+            if git_usage in [GitUsage.git_local_and_remote]:
+                remote_inspector                                = RepoInspectorFactory.findInspector(self.remote_root,repo_name)
+                remote_log_df                                   = remote_inspector.log_to_dataframe()
+                result_dict[repo_name][RepoStatics.REMOTE_REPO] = remote_log_df
+ 
         return result_dict
 
     def _git_ignore_content(self):

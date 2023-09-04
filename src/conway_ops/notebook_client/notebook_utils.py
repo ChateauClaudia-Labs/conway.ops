@@ -73,8 +73,11 @@ class NotebookUtils(abc.ABC):
         from conway_ops.repo_admin.repo_administration                          import RepoAdministration, GitUsage
         from conway_ops.repo_admin.chassis_repo_bundle                          import Chassis_RepoBundle
         from conway_ops.repo_admin.repo_bundle_subset                           import RepoBundleSubset
+        from conway_ops.scaffolding.scaffold_generator                          import ScaffoldGenerator
+        from conway_ops.scaffolding.scaffold_spec                               import ScaffoldSpec
         
         from conway.util.dataframe_utils                                        import DataFrameUtils
+        from conway.util.path_utils                                             import PathUtils
         from conway.util.timestamp                                              import Timestamp
         from conway.util.profiler                                               import Profiler
         from conway.database.data_accessor                                      import DataAccessor
@@ -85,7 +88,10 @@ class NotebookUtils(abc.ABC):
         self.RepoAdministration                 = RepoAdministration
         self.Chassis_RepoBundle                 = Chassis_RepoBundle
         self.RepoBundleSubset                   = RepoBundleSubset
+        self.ScaffoldGenerator                  = ScaffoldGenerator
+        self.ScaffoldSpec                       = ScaffoldSpec
         self.DataFrameUtils                     = DataFrameUtils
+        self.PathUtils                          = PathUtils
         self.Timestamp                          = Timestamp
         self.Profiler                           = Profiler
         self.DataAccessor                       = DataAccessor

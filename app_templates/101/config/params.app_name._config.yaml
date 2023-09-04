@@ -1,1 +1,0 @@
-secrets_location: {{ params.project_root }}/config/secrets.yaml

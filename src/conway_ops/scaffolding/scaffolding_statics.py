@@ -9,18 +9,28 @@ class ScaffoldingStatics(abc.ABC):
     def __init__(self):
         pass
 
-    PARAMS                                              = "params"
-    APP_CODE_PARAM                                      = "app_code"
-    APP_NAME_PARAM                                      = "app_name"
-    APP_NAME_UPPER_PARAM                                = "app_name_upper"
-    APP_ABBREVIATION_UPPER_PARAM                        = "app_abbreviation_upper"
-    APP_ABBREVIATION_LOWER_PARAM                        = "app_abbreviation_lower"
-    APP_MODULE_PARAM                                    = "app_module"
+    PARAMS                                              = "p" # "params"
 
     AUTHOR_PARAM                                        = "author"
     AUTHOR_EMAIL_PARAM                                  = "author_email"
     PROJECT_DESCRIPTION_PARAM                           = "project_description"
     PROJECT_ROOT_PARAM                                  = "project_root"
+
+    PROJECT_PARAM                                       = "project"
+    APP_PARAM                                           = "app"
+    APP_CODE_PARAM                                      = "app_code"
+
+    CALC_SVC_PARAM                                      = "calc"
+    CALC_SVC_RESOURCE                                   = "calc_resource"
+
+    IMPORT_SVC_PARAM                                    = "import"
+    IMPORT_SVC_RESOURCE                                 = "import_resource"
+
+    INPUT_HUB_PARAM                                     = "in_hub"
+
+    OUTPUT_HUB_PARAM                                    = "out_hub"
+
+
 
 
   

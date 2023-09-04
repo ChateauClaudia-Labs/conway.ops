@@ -1,15 +1,11 @@
-{% macro SCENARIOS() -%}
-    {{ params.app_abbreviation_upper }}_SCENARIOS_REPO
-{%- endmacro %}
-
 import os                                               as _os
 
 from conway.observability.logger                        import Logger
 
-class {{ params.app_abbreviation_upper }}_Logger(Logger):
+class {{ LOGGER() }}(Logger):
 
     '''
-    Utility to control what messages get logged by the ``{{ params.app_module }}`` module
+    Utility to control what messages get logged by the ``{{ p.app }}`` module
     '''
     def __init__(self, activation_level):
 
@@ -26,14 +22,14 @@ class {{ params.app_abbreviation_upper }}_Logger(Logger):
         long root paths by a string for an environment variable
         '''
         msg1                                            = super().unclutter(message)
-        {{ SCENARIOS() }}                               = "{{ params.app_name_upper }}_SCENARIOS_REPO"
+        {{ SCENARIOS() }}                               = "{{ SCENARIOS() }}"
         if {{ SCENARIOS() }} in _os.environ.keys():
             VAR                                         = _os.environ[{{ SCENARIOS() }}]
-            msg2                                        = msg1.replace(VAR, f"${{ SCENARIOS()}}")
+            msg2                                        = msg1.replace(VAR, "$" + {{ SCENARIOS() }})
 
             # Try a variation i ncase VAR is "/c/..." but msg2 starts with "C:/..."
             VAR2                                        = VAR.replace("/c/", "C:/")
-            msg3                                        = msg2.replace(VAR2, f"${{ SCENARIOS()}}")
+            msg3                                        = msg2.replace(VAR2, "$" + {{ SCENARIOS() }})
             result                                      = msg3
         else:
             result                                      = msg1

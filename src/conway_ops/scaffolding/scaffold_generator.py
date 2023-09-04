@@ -1,6 +1,8 @@
 from jinja2                                                 import Environment, FileSystemLoader
 from pathlib                                                import Path
+import itertools
 
+from conway.util.case_utils                                 import CaseUtils
 from conway_ops.scaffolding.scaffolding_statics             import ScaffoldingStatics
 
 class ScaffoldGenerator():
@@ -29,85 +31,149 @@ class ScaffoldGenerator():
             folder external from all repos, and scaffolding generation is done one repo at a time.
         '''
         generated_files_l                                   = []
+        func_dict                                           = self._get_additional_template_functions()
         if subproject == "config": # Special case
             subproject_templates                            = f"{self.spec.templates_root}/config"
         else: # we are generating code for a repo, folder structure is templated
-            subproject_templates                            = f"{self.spec.templates_root}/{ScaffoldingStatics.PARAMS}.{ScaffoldingStatics.APP_CODE_PARAM}.{subproject}"
+            subproject_templates                            = f"{self.spec.templates_root}/{ScaffoldingStatics.PARAMS}.{ScaffoldingStatics.PROJECT_PARAM}.{subproject}"
         environment                                         = Environment(loader=FileSystemLoader(subproject_templates))
         for template_relative_path in environment.list_templates():
             template                                        = environment.get_template(template_relative_path)
-            
-            content = template.render(
-                self.spec.variables_dict
-            )
-            destination_filename                            = f"{self.project_root}/{template_relative_path}"
-            destination_filename                            = self._eval_templated_path(destination_filename, self.spec.variables_dict)
-            destination_path                                = Path(destination_filename).parent.as_posix()
-            Path(destination_path).mkdir(parents=True, exist_ok=True)
-            with open(destination_filename, mode="w", encoding="utf-8") as generated_file:
-                generated_file.write(content)
-                generated_files_l.append(destination_filename)
+            template.globals.update(func_dict)
+            destination_templated_filename                  = f"{self.project_root}/{template_relative_path}"
+            destination_filenames_l                         = self._eval_templated_path(destination_templated_filename, 
+                                                                                        self.spec.variables_dict)
+            for destination in destination_filenames_l:
+                content = template.render(
+                    self.spec.variables_dict
+                )
+                destination_path                                = Path(destination).parent.as_posix()
+                Path(destination_path).mkdir(parents=True, exist_ok=True)
+                with open(destination, mode="w", encoding="utf-8") as generated_file:
+                    generated_file.write(content)
+                    generated_files_l.append(destination)
 
         return generated_files_l
     
-
-    def _eval_templated_folder(self, folder, variables_dict):
+    def _get_additional_template_functions(self):
         '''
-        Helper method to modify folder names that are using template variables.
+        Returns a dictionary where the keys are strings and the values are Python callables.
+
+        The intention is to pass this functions dictionary to Jinja templates' globals, as a way to enrich the Jinja
+        primitives with additional functions that can be called in the Jinja constructs.
+        This was inspired by https://saidvandeklundert.net/2020-12-24-python-functions-in-jinja/
+        '''
+        SS                                              = ScaffoldingStatics
+        CU                                              = CaseUtils
+        P                                               = self.spec.variables_dict[SS.PARAMS]
+        func_dict = {
+            "camel":                                    CU.as_camel,
+            "pascal":                                   CU.as_pascal,
+            "snake":                                    CU.as_snake,
+            "kebab":                                    CU.as_kebab,
+            "static":                                   CU.as_static,
+
+            "LOGGER":                                   lambda: CU.as_static(P[SS.APP_CODE_PARAM]) + "_Logger",
+            "logger":                                   lambda: P[SS.APP_CODE_PARAM] + "_logger",
+            "SCENARIOS":                                lambda: CU.as_static(P[SS.APP_CODE_PARAM]) + "_SCENARIOS_REPO",
+            "APP":                                      lambda: CU.as_static(P[SS.APP_CODE_PARAM]),
+        }
+        return func_dict
+
+
+    def _eval_templated_path_part(self, path_part, variables_dict):
+        '''
+        Helper method to modify *path_part* names that are using template variables
+        (a *path_part* is either a folder or a filename).
+
         It is a building block for ``self._eval_templated_path``, whereby the latter breaks a path into 
-        the component folders and uses this method to evaluate each folder separately.
+        the component path_parts and uses this method to evaluate each path_part separately.
 
-        For example, if ``variables_dict["params"]["app_code"] == "cash"``, then if ``folder == "params.app_code.svc"``
-        the method will return ``cash.svc``
+        Additionally, a templated path_part may evaluate to one or multiple path_parts, depending on whether
+        the ``variable_dict`` tree of entries is a :class:``str`` or a :class:``list``.
 
-        :param str folder: a posibly templated folder or filename. Example: ``"params.app_name"``
+        For that reason, this method returns a list.
+
+        For example, if ``variables_dict["p"]["project"] == "cash"``, then if ``path_part == "p.project.svc"``
+        the method will return ``[cash.svc]``
+
+        As an example of multiple path_parts, if ``variables_dict["p"]["svc"] == ["pricing", "reporting"],
+        then if ``path_part == p.svc._config``, then this method will return 
+        ["pricing_config", "reporting_config"]
+
+        :param str path_part: a posibly templated path_part or filename. Example: ``"p.project"``
         :param dict variables_dict: dictionary defining the template variables, possibly nested across subdictionaries.
-        :return: a modified folder where templated strings are replaced by their values.
-        :rtype: str
+        :return: a modified path_part where templated strings are replaced by their values.
+        :rtype: list[str]
         '''
-        tokens = folder.split(".")
+        tokens = path_part.split(".")
         if len(tokens) == 0 or not tokens[0] in variables_dict.keys(): # Hit bottom - nothing templated in the path
-            return folder
+            return [path_part]
         
         # If we get here, then we had a match, so the path includes templates
         val                                                 = variables_dict[tokens[0]]
-        tail_folder                                         = ".".join(tokens[1:])
+        tail_path_part                                         = ".".join(tokens[1:])
         
         if type(val)==dict: # we need to recurse
-            return self._eval_templated_folder(tail_folder, val)
+            return self._eval_templated_path_part(tail_path_part, val)
+        elif type(val)==list:
+            return [f"{str(item)}{tail_path_part}" for item in val]
         else:
-            #if len(tail_folder) > 0: # There was more text than the template variables, so need to not lose the "."
-            #    tail_folder                                 = f".{tail_folder}"
-            return f"{str(val)}{tail_folder}"
+            return [f"{str(val)}{tail_path_part}"]
         
     def _eval_templated_path(self, path, variables_dict):
         '''
-        Helper methd to evaluate template variables in a templated path and return the resulting path.
+        Helper method to evaluate template variables in a templated path and return the resulting path.
+
+        It returns a list, since it is possible for a templated path to evaluate to multiple concrete
+        paths.
 
         For example, if 
         
         .. code-block::
         
-            path == "params.app_code.svc/src/params.app_name/__init__.py"
+            path == p.project.svc/src/p.app/__init__.py"
             
         then this mehod will return
 
         .. code-block::
         
-            "cash.svc/src/CashManagement/__init__.py"
+            ["cash.svc/src/cash_management/__init__.py"]
             
         provided that 
 
-        * ``variables_dict["params"]["app_code"] == "cash"``
-        * and ``variables_dict["params"]["app_name"] == "CashManagement"``
+        * ``variables_dict["p"]["project"] == "cash"``
+        * and ``variables_dict["p"]["app_name"] == "cash_management"``
 
-        :param str path: a posibly templated folder or filename. Example: ``"params.app_code.svc/src/params.app_name/__init__.py"``
+        :param str path: a posibly templated path_part or filename. Example: ``"p.project.svc/src/p.app/__init__.py"``
         :param dict variables_dict: dictionary defining the template variables, possibly nested across subdictionaries.
+            Some template variables might be defined as lists, meaning that each item in the list is a possible
+            value for evaluating the templated path.
         :return: a modified path where templated strings are replaced by their values.
-        :rtype: str
+        :rtype: list[str]
         '''
-        evaluated_parts                                     = []
-        for templated_folder in Path(path).parts:
-            folder                                          =  self._eval_templated_folder(templated_folder, variables_dict)
-            evaluated_parts.append(folder)
-        return "/".join(evaluated_parts)
+        # evaluated_parts is a list of lists. The first index corresponds to each part x 
+        # in the templated path. The second index corresponds to all the possible path paths that x might evaluate to.
+        evaluated_parts                                 = [] 
+        for templated_path_part in Path(path).parts:
+            path_part_l                                 =  self._eval_templated_path_part(templated_path_part, 
+                                                                                             variables_dict)
+            evaluated_parts.append(path_part_l)
+
+        # Now we must process the "list of lists", and allow for all combinations, in the following sense:
+        #
+        #   Say the first member of evaluated parts is [x1, x2, .., x5]
+        #       and the second member is [y1]
+        #       and the third is [z1, z2,..., z6]
+        #
+        #   Then we will crete a list of paths "xi/yj/zk" for all combinations of i=1, ...6, j-1, and z=1, ..., 6
+        #
+        result_l                                        = []
+        
+        # The asterisk in *evaluated_parts unbundles the list so that we can pass a non-deterministic
+        # number of arguments to itertools.product. Each such argument is one of the inner lists in evaluated_parts
+        # (recall that evaluated_parts is a list of lists)
+        for combination in itertools.product(*evaluated_parts):
+            result_l.append("/".join(combination))
+
+        return result_l

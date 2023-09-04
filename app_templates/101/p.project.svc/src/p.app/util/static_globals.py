@@ -3,7 +3,7 @@
 class DataHubSchema():
 
     '''
-    This class contains statics used to define the structure of DataHubs used by the {{ params.app_name }} application.
+    This class contains statics used to define the structure of DataHubs used by the {{ p.app }} application.
     '''
     def __init__(self):
         pass

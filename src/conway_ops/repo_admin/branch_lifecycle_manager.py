@@ -62,10 +62,17 @@ class BranchLifecycleManager(RepoAdministration):
     :param RepoBundle repo_bundle: Object encapsulating the names of the GIT repos for which joint GIT operations 
         are to be done by this :class:`RepoAdministration` instance.
 
-    '''
-    def __init__(self, local_root, remote_root, repo_bundle):
+    :param str remote_gh_user: GitHub username with rights to the remote repository. If the remote is not in
+        GitHub, it may be set to None
 
-        super().__init__(local_root, remote_root, repo_bundle)
+    :param str gb_secrets_path: path in the local file system for a file that contains a GitHub token to access the remote.
+        The token must correspond to the user given by the `remote_gh_user` parameter. If the remote is not in GitHub
+        then it may be set to None
+
+    '''
+    def __init__(self, local_root, remote_root, repo_bundle, remote_gh_user, gb_secrets_path):
+
+        super().__init__(local_root, remote_root, repo_bundle, remote_gh_user, gb_secrets_path)
 
     MASTER_BRANCH                                       = "master"
     INTEGRATION_BRANCH                                  = "integration"
@@ -142,20 +149,19 @@ class BranchLifecycleManager(RepoAdministration):
             remote_inspector.pull_request(from_branch = self.OPERATE_BRANCH, to_branch = self.MASTER_BRANCH)
 
             # Update master => integration (remote)
-            remote_inspector.pull_request(from_branch = self.MASTER_BRANCH, to_branch = self.OPERATE_BRANCH)
+            remote_inspector.pull_request(from_branch = self.MASTER_BRANCH, to_branch = self.INTEGRATION_BRANCH)
 
             # Make sure we end up in the master branch after updating the remote operate branch
             remote_inspector.checkout(self.MASTER_BRANCH)
 
             self.log_info("\n\t\t ***** In the local...")
-            # Now update local integration from de
+            # Now update local integration from the remote
             local_inspector.update_local(self.INTEGRATION_BRANCH)
 
             # Make sure to come back to the operate branch (as above command moved us to the integration branch)
             local_inspector.checkout(self.OPERATE_BRANCH)
 
 
-        raise ValueError("Unimplemented")
 
     def complete_feature(self, feature_branch, remove_feature_branch=False):
         '''
@@ -246,8 +252,27 @@ class BranchLifecycleManager(RepoAdministration):
                 #       UPSHOT: nest double quotes inside single quotes: the command is a string defined by single quotes
                 status2                                 = executor.execute(command = 'git commit -m "' + str(commit_msg) + '"')
                 self.log_info("Commit '" + str(feature_branch) + "':\n" + str(status2)) 
+            
+            # When the remote is in GitHub, for the git push to work, we will need to use our specific owner and 
+            # token for the remote. So set them up if needed:
+            #
+            if not self.github_token is None and not self.remote_gh_user is None:
+                USER                                    = self.remote_gh_user
+                PWD                                     = self.github_token
+                CMD                                     = f"git remote set-url origin https://{USER}:{PWD}@github.com/{USER}/{repo_name}.git"
+                executor.execute(command = CMD)
 
-            status3                                     = executor.execute(command = 'git push')
+            try:
+                status3                                 = executor.execute(command = 'git push')
+            except Exception as ex:
+                self.log_info(f"Error during 'git push' - sometimes this is due to missing credentials."
+                              + f" If 'git config --get credential.helper' returns 'manager', then GIT is using the Windows "
+                              + f"Credentials Manager, and it is probably not correctly configured for the remote's URL. "
+                              + f"If instead GIT is using a GIT-specific credential store, look at "
+                              + f"https://git-scm.com/docs/gitcredentials. Also check out "
+                              + f"https://github.com/git-ecosystem/git-credential-manager/blob/main/docs/multiple-users.md")
+                raise ex
+
             self.log_info("Push '" + str(feature_branch) + "':\n" + str(status3)) 
 
     def work_on_feature(self, feature_branch):

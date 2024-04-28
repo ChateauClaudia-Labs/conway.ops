@@ -98,6 +98,8 @@ class _ProjectCreationContext:
 
 
 
+from conway.util.yaml_utils                                     import YAML_Utils
+
 class RepoAdministration():
 
     '''
@@ -109,12 +111,28 @@ class RepoAdministration():
 
     :param RepoBundle repo_bundle: Object encapsulating the names of the GIT repos for which joint GIT operations 
         are to be done by this :class:`RepoAdministration` instance.
-        
+
+    :param str remote_gh_user: GitHub username with rights to the remote repository. If the remote is not in
+        GitHub, it may be set to None
+
+    :param str gb_secrets_path: path in the local file system for a file that contains a GitHub token to access the remote.
+        The token must correspond to the user given by the `remote_gh_user` parameter. If the remote is not in GitHub
+        then it may be set to None
+
     '''
-    def __init__(self, local_root, remote_root, repo_bundle):
+    def __init__(self, local_root, remote_root, repo_bundle, remote_gh_user, gb_secrets_path):
         self.local_root                                 = local_root
         self.remote_root                                = remote_root
         self.repo_bundle                                = repo_bundle
+        self.remote_gh_user                             = remote_gh_user
+        self.gb_secrets_path                            = gb_secrets_path
+
+        # Load the token for accessing the remote in GitHub, if we indeed are using GitHub and have a secrets path
+        if not self.gb_secrets_path is None:
+            secrets_dict                                = YAML_Utils().load(self.gb_secrets_path)
+            self.github_token                           = secrets_dict['secrets']['github_token']  
+        else:
+            self.github_token                           = None          
 
     def create_project(self, project_name, work_branch_name, scaffold_spec=None, git_usage=GitUsage.git_local_and_remote):
         '''

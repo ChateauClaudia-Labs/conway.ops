@@ -1,7 +1,9 @@
 import requests                                             as _requests
 from dateutil                                               import parser as _parser
 
+
 from conway.application.application                         import Application
+
 from conway.util.yaml_utils                                 import YAML_Utils
 from conway_ops.repo_admin.repo_inspector                   import RepoInspector, CommitInfo, CommittedFileInfo
 
@@ -84,7 +86,16 @@ class GitHub_RepoInspector(RepoInspector):
             raise ValueError("Problem connecting to Git Hub. Error is: " + str(ex))
 
         if response.status_code != 200:
-            raise ValueError("Error status " + str(response.status_code) + " from doing: GET on '" + str(url) + "'")  
+            certificate_file                = f"<YOUR CONDA INSTALL ROOT>/envs/<YOUR CONDA ENVIRONMENT>/lib/site-packages/certifi/cacert.pem"
+                         
+            raise ValueError(f"Error status {response.status_code} from doing: GET on '{url}'."
+                             + f"\nThis often happens due to one of two things: "
+                             + f"\n\t1) expired GitHub certificates (most common)"
+                             + f"\n\t2) or expired GitHub token in the secrets file for conway.ops"
+                             + f"\nFor the first, if using Conda, check {certificate_file}"
+                             + f"\nFor the latter, login to GitHub as a user with access to the remote repos in question"
+                             + f"\nand generate a token (in settings=>developer settings) and copy it to the secrets file for this repo.")  
+
         return data      
 
 

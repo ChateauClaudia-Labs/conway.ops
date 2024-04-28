@@ -1,7 +1,7 @@
 import requests                                             as _requests
 from dateutil                                               import parser as _parser
 
-from conway.util.timestamp                                  import Timestamp
+from conway.application.application                         import Application
 from conway.util.yaml_utils                                 import YAML_Utils
 from conway_ops.repo_admin.repo_inspector                   import RepoInspector, CommitInfo, CommittedFileInfo
 
@@ -33,9 +33,9 @@ class GitHub_RepoInspector(RepoInspector):
         if len(self.owner) == 0:
             raise ValueError("No owner was included in parent url '" + str(parent_url) + "', so can't call Git Hub APIs")
         
-        # Get GitHub token to make authenticated calls
+        # Get GitHub token to make authenticated calls.
         #
-        SECRETS_PATH                                    = "C:/Alex/Code/conway_fork/secrets.yaml"
+        SECRETS_PATH                                    = Application.app().config.secrets_path()
         secrets_dict                                    = YAML_Utils().load(SECRETS_PATH)
         self.github_token                               = secrets_dict['secrets']['github_token']
 
@@ -84,7 +84,7 @@ class GitHub_RepoInspector(RepoInspector):
             raise ValueError("Problem connecting to Git Hub. Error is: " + str(ex))
 
         if response.status_code != 200:
-            raise ValueError("Error status " + str(r.status_code) + " from doing: GET on '" + str(url) + "'")  
+            raise ValueError("Error status " + str(response.status_code) + " from doing: GET on '" + str(url) + "'")  
         return data      
 
 
